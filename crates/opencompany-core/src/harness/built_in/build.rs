@@ -101,8 +101,6 @@ use std::sync::Arc;
 use openhuman_core as oh;
 
 use oh::security::SecurityPolicy;
-#[cfg(feature = "mcp")]
-use oh::tools::McpListToolsTool;
 // OpenHuman v0.64.10 moved the filesystem tools into `tinytools-std`; the same
 // vendored copy `openhuman-core` depends on, so these are the one type.
 use openhuman_embed::{Access, AgentDefinitionSpec, AgentSpec, ToolScopeSpec};
@@ -121,8 +119,6 @@ use crate::harness::policy::ApprovalPolicy;
 use crate::harness::skills::EffectiveSkills;
 use crate::harness::toolbelt;
 use crate::hive::mcp_server::{McpAttach, attach_opencompany_mcp};
-#[cfg(feature = "mcp")]
-use crate::mcp::agent::{OcMcpCallTool, granted_policies, granted_secrets, registry_for_agent};
 use crate::ports::skills_state::SkillState;
 use crate::ports::types::CompanyId;
 use crate::runtime::tools::{NAMESPACE_SEPARATORS, extends_on_boundary};
@@ -1038,48 +1034,6 @@ pub fn build_agent_with_model(
         }
     }
 
-    // MCP bridge (issue #50): if this agent is granted any enabled MCP server
-    // (via its `mcp:*` tool grants), give it the bridge tools over a registry
-    // scoped to just those servers. The registry reuses OpenHuman's HTTP
-    // transport + injection-safety filter. No server-listing tool is wired:
-    // OpenHuman's own serializes each server's credentials. `mcp_call_tool` takes
-    // a permissive OpenHuman `SecurityPolicy` (Supervised — allows `Act`);
-    // OpenCompany's own `ApprovalPolicy` tool policy below stays the real
-    // per-call gate.
-    #[cfg(feature = "mcp")]
-    if let Some(registry) = registry_for_agent(&deps.mcp_servers, grants) {
-        let mcp_security = Arc::new(SecurityPolicy::default());
-        // The known-secret set for the scrubber: every credential the agent's
-        // granted servers carry, so no configured token can leak into an
-        // agent-visible MCP error (the error-hardening cell). Use the same
-        // effective grants that selected `registry`, not the raw manifest
-        // request: an empty request inherits the company belt and can therefore
-        // reach servers even when `manifest_agent.tools` is empty.
-        let secrets = granted_secrets(&deps.mcp_servers, grants);
-        let mcp_policies = granted_policies(&deps.mcp_servers, &manifest_agent.id, grants);
-        tools.push(Box::new(McpListToolsTool::new(registry.clone())));
-        // `OcMcpCallTool` replaces upstream's `McpCallTool`: same name/schema,
-        // but it classifies + scrubs failures, rewrites the agent-facing text,
-        // and records each failure on the shared queue the brain drains.
-        // The metering handle lets `mcp_call_tool` record an `OauthCall` usage
-        // sample per completed call, so a company routing its real work through
-        // MCP stops reading as zero in the Usage view's calls-by-provider chart
-        // and `connections` KPI (issue #698). A `None` meter leaves metering
-        // off, exactly as on the Composio path.
-        tools.push(Box::new(OcMcpCallTool::new(
-            registry,
-            mcp_security,
-            secrets,
-            deps.mcp_failures.clone(),
-            crate::mcp::agent::McpMetering {
-                company: company.clone(),
-                agent: manifest_agent.id.clone(),
-                meter: deps.meter.clone(),
-            },
-            mcp_policies,
-        )));
-    }
-
     #[cfg(feature = "mcp")]
     persona.push_str(&agent_mcp.persona_brief(&agent_mcp.registry_installs(company)));
 
@@ -1235,6 +1189,16 @@ pub fn build_agent_with_model(
 
     super::tool_posture::declare();
     let native_tool_names = native_tool_names(&tools);
+    #[cfg(feature = "mcp")]
+    let native_tool_names: Vec<String> = native_tool_names
+        .into_iter()
+        .chain(
+            agent_mcp
+                .native_tool_names()
+                .iter()
+                .map(|name| name.to_string()),
+        )
+        .collect();
     Ok(AgentBlueprint {
         system_prompt: persona,
         tools,

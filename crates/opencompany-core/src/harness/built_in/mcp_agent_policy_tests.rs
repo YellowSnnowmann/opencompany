@@ -140,21 +140,6 @@ fn an_upgraded_company_builds_the_same_attachment() {
     }
 }
 
-/// The bridge tool's own set is built for one teammate, so it cannot answer for
-/// another.
-#[test]
-fn the_bridge_tools_policy_set_is_built_for_one_teammate() {
-    let servers = vec![server_with_a_writer_rule()];
-    let reach = grants(&["mcp:*"]);
-
-    let writer = crate::mcp::agent::granted_policies(&servers, "writer", &reach);
-    let engineer = crate::mcp::agent::granted_policies(&servers, "engineer", &reach);
-
-    assert!(writer.is_blocked("notion", "search_pages"));
-    assert!(!engineer.is_blocked("notion", "search_pages"));
-    assert!(!writer.is_blocked("notion", "get_page"));
-}
-
 /// The gate's read set follows the per-agent mode, and an episode seat resolves
 /// the same one the chat agent does.
 ///

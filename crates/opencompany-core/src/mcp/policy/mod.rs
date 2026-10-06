@@ -534,64 +534,6 @@ pub fn blocks_tool(policies: &McpToolPolicies, inventory: &McpToolInventory, too
     resolve_policy(policies, tool, inventory.suggested(tool)).mode == ApprovalMode::Blocked
 }
 
-/// Every granted server's resolved policy, addressed by server name, for one
-/// teammate.
-///
-/// The call-time face of the same documents [`mcp_allow_set`] flattens. The
-/// allow set answers a question the approval gate asks *before* a call; this
-/// answers one the bridge tool asks at the point it would dial.
-///
-/// Carries the agent it was built for: a set built for one teammate has no
-/// answer for another.
-#[derive(Clone, Debug, Default)]
-pub struct McpToolPolicySet {
-    agent: String,
-    by_server: HashMap<String, (McpToolPolicies, McpToolInventory)>,
-}
-
-impl McpToolPolicySet {
-    /// Collects the enabled servers' policies as they stand for `agent`. A
-    /// disabled server hands out no tool, so a call through it could not have
-    /// been made.
-    ///
-    /// Takes an iterator so a caller can narrow the set first — the harness
-    /// hands it only the servers an agent's grants reach, the way it already
-    /// narrows the credential substrings it collects.
-    pub fn from_declarations<'a>(
-        agent: &str,
-        servers: impl IntoIterator<Item = &'a McpServerDecl>,
-    ) -> Self {
-        Self {
-            agent: agent.to_string(),
-            by_server: servers
-                .into_iter()
-                .filter(|server| server.enabled)
-                .map(|server| {
-                    (
-                        server.name.clone(),
-                        (server.tool_policies.clone(), server.tool_inventory.clone()),
-                    )
-                })
-                .collect(),
-        }
-    }
-
-    /// Whether this call is refused outright for the teammate this set was built
-    /// for.
-    ///
-    /// A server with no policy answers `false`: blocking is an explicit
-    /// operator act, and the absence of one is the absence of that act, not a
-    /// reason to refuse. Nothing is granted by answering `false` either — the
-    /// approval gate has already decided separately whether the call parks.
-    pub fn is_blocked(&self, server: &str, tool: &str) -> bool {
-        self.by_server
-            .get(server)
-            .is_some_and(|(policies, inventory)| {
-                blocks_tool_for_agent(policies, inventory, &self.agent, tool)
-            })
-    }
-}
-
 /// Every tool this server refuses outright, sorted.
 ///
 /// The attachment-time face of [`blocks_tool`]: a company agent reaches a

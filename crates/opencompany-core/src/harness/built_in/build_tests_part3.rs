@@ -126,7 +126,13 @@ fn no_configured_mcp_server_wires_no_server_backed_mcp_tool() {
         "this test's premise is a company with no configured server"
     );
     assert!(
-        crate::mcp::agent::registry_for_agent(&deps.mcp_servers, &["*".to_string()]).is_none(),
+        !crate::mcp::agent::resolve_for_agent(
+            &deps.mcp_servers,
+            "desk",
+            &["*".to_string()],
+            deps.mcp_home.clone(),
+        )
+        .declared_wired(),
         "no configured server must yield no registry, even under `*`"
     );
 

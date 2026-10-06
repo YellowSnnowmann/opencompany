@@ -1,5 +1,10 @@
 use super::*;
 
+use std::sync::Arc;
+
+use serde_json::json;
+use tinytools::Tool;
+
 /// Shared with [`super::blocked_tests`], which builds the same declarations and
 /// then attaches a policy to them.
 pub(super) fn decl(name: &str, endpoint: &str) -> McpServerDecl {
@@ -23,62 +28,13 @@ pub(super) fn grants(g: &[&str]) -> Vec<String> {
     g.iter().map(|s| s.to_string()).collect()
 }
 
-#[test]
-fn empty_decls_yield_no_registry() {
-    assert!(registry_for_agent(&[], &grants(&["mcp:*"])).is_none());
-}
-
-#[test]
-fn server_name_strips_markdown_fences() {
-    // Models wrap identifiers in markdown when answering in prose style;
-    // the fence characters belong to the answer, not the server name
-    // (seen live: server="werkplaats`" -> "unknown mcp server `werkplaats``").
-    let mk = |v: &str| serde_json::json!({ "server": v });
-    let parsed = |v: &str| required_string_arg(&mk(v), "server").unwrap();
-    assert_eq!(parsed("werkplaats"), "werkplaats");
-    assert_eq!(parsed("werkplaats`"), "werkplaats");
-    assert_eq!(parsed("`werkplaats`"), "werkplaats");
-    assert_eq!(parsed("*werkplaats*"), "werkplaats");
-    assert_eq!(parsed("werkplaats."), "werkplaats");
-    assert_eq!(parsed("werk"), "werk");
-    assert!(required_string_arg(&mk("```"), "server").is_err());
-}
-
-#[test]
-fn ungranted_agent_gets_no_registry() {
-    let decls = vec![decl("notion", "https://notion.example/mcp")];
-    // No mcp grant at all.
-    assert!(registry_for_agent(&decls, &grants(&["email.send"])).is_none());
-}
-
-#[test]
-fn wildcard_grant_admits_all_enabled_servers() {
-    let decls = vec![
-        decl("notion", "https://notion.example/mcp"),
-        decl("linear", "https://linear.example/mcp"),
-    ];
-    let reg = registry_for_agent(&decls, &grants(&["mcp:*"])).expect("registry");
-    let mut names: Vec<&str> = reg.list().iter().map(|s| s.name.as_str()).collect();
-    names.sort_unstable();
-    assert_eq!(names, vec!["linear", "notion"]);
-}
-
-#[test]
-fn named_grant_scopes_to_that_server() {
-    let decls = vec![
-        decl("notion", "https://notion.example/mcp"),
-        decl("linear", "https://linear.example/mcp"),
-    ];
-    let reg = registry_for_agent(&decls, &grants(&["mcp:notion"])).expect("registry");
-    let names: Vec<&str> = reg.list().iter().map(|s| s.name.as_str()).collect();
-    assert_eq!(names, vec!["notion"]);
-}
-
-#[test]
-fn disabled_server_is_excluded() {
-    let mut d = decl("notion", "https://notion.example/mcp");
-    d.enabled = false;
-    assert!(registry_for_agent(&[d], &grants(&["mcp:*"])).is_none());
+/// The `mcp_call_tool` a company agent runs: upstream's own, over the declared
+/// servers attached to its spec, with an act gate that admits every call.
+fn native_call_tool(decls: &[McpServerDecl]) -> tinymcp::tools::McpCallTool {
+    tinymcp::tools::McpCallTool::new(
+        Arc::new(registry_from_decls(decls)),
+        Arc::new(|_: &str| Ok(())),
+    )
 }
 
 #[test]
@@ -86,7 +42,8 @@ fn gitbooks_default_server_never_leaks_in() {
     // OpenHuman's Config::default seeds a `gitbooks` server; the registry we
     // build for a tenant agent must NOT contain it.
     let decls = vec![decl("notion", "https://notion.example/mcp")];
-    let reg = registry_for_agent(&decls, &grants(&["mcp:*"])).expect("registry");
+    let reg = registry_from_decls(&decls);
+    assert!(reg.get("notion").is_some());
     assert!(reg.get("gitbooks").is_none(), "gitbooks must not leak in");
 }
 
@@ -125,7 +82,7 @@ fn auth_material_maps_onto_transport_config() {
 async fn upstream_list_servers_tool_never_emits_a_credential() {
     let mut d = decl("notion", "https://notion.example/mcp");
     d.auth = AuthMaterial::Bearer("sk-super-secret-token".into());
-    let reg = registry_for_agent(&[d], &grants(&["mcp:*"])).expect("registry");
+    let reg = Arc::new(registry_from_decls(&[d]));
     // Upstream's tool, which this host relies on rather than replacing: the
     // guarantee is still this host's to check.
     let tool = tinymcp::tools::McpListServersTool::new(reg);
@@ -155,7 +112,6 @@ async fn call_tool_through_agent_path_never_leaks_bearer() {
     use axum::http::HeaderMap;
     use axum::routing::post;
     use axum::{Json, Router};
-    use oh::security::SecurityPolicy;
 
     #[derive(Default)]
     struct Seen {
@@ -208,15 +164,7 @@ async fn call_tool_through_agent_path_never_leaks_bearer() {
     let endpoint = format!("http://{addr}/mcp");
     let mut d = decl("fixture", &endpoint);
     d.auth = AuthMaterial::Bearer("sk-super-secret-xyz".into());
-    let registry = registry_for_agent(&[d], &grants(&["mcp:*"])).expect("registry");
-    let tool = OcMcpCallTool::new(
-        registry,
-        Arc::new(SecurityPolicy::default()),
-        vec!["sk-super-secret-xyz".into()],
-        McpFailureQueue::default(),
-        McpMetering::off(),
-        Default::default(),
-    );
+    let tool = native_call_tool(&[d]);
 
     let result = tool
         .execute(json!({ "server": "fixture", "tool": "echo", "arguments": {} }))
@@ -238,33 +186,16 @@ async fn call_tool_through_agent_path_never_leaks_bearer() {
     assert!(result.output().contains("remote ran ok"));
 }
 
-/// An empty raw request inherits the company belt at the builder seam. The
-/// scrubber must receive those effective grants too, or an MCP credential
-/// echoed by a server can reach the agent-visible failure even though the
-/// registry correctly wires that server.
-#[test]
-fn granted_secrets_follows_effective_grants() {
-    let mut server = decl("fixture", "http://127.0.0.1:1/mcp");
-    server.auth = AuthMaterial::Bearer("inherited-canary".into());
-    let inherited = granted_secrets(std::slice::from_ref(&server), &grants(&["*", "mcp:*"]));
-    assert_eq!(inherited, vec!["inherited-canary"]);
-
-    let omitted = granted_secrets(std::slice::from_ref(&server), &grants(&["*"]));
-    assert!(omitted.is_empty());
-}
-
 /// SECURITY CANARY: a server that **reflects the submitted credential** in a
-/// non-401 error body must not leak it anywhere the `OcMcpCallTool` decorator
-/// surfaces — not the agent-visible result, and not the drained failure. This
-/// is the regression guard for leak vector #1 (upstream `MCP HTTP {status} —
+/// non-401 error body must not leak it into the agent-visible result of the
+/// `mcp_call_tool` an agent actually runs. This is the regression guard for leak vector #1 (upstream `MCP HTTP {status} —
 /// {body}` echoing the body) driven through the REAL vendored transport.
 #[tokio::test]
-async fn oc_call_tool_scrubs_reflected_credential() {
+async fn native_call_tool_scrubs_reflected_credential() {
     use axum::extract::State;
     use axum::http::HeaderMap;
     use axum::routing::post;
     use axum::{Json, Router};
-    use oh::security::SecurityPolicy;
 
     // On tools/call, reflect the Authorization header back in a 500 body — the
     // exact hostile shape that would leak the token through upstream's
@@ -317,18 +248,7 @@ async fn oc_call_tool_scrubs_reflected_credential() {
     let endpoint = format!("http://{addr}/mcp");
     let mut d = decl("fixture", &endpoint);
     d.auth = AuthMaterial::Bearer(CANARY.into());
-    let secrets = granted_secrets(std::slice::from_ref(&d), &grants(&["mcp:*"]));
-    let registry = registry_for_agent(&[d], &grants(&["mcp:*"])).expect("registry");
-
-    let queue = McpFailureQueue::default();
-    let tool = OcMcpCallTool::new(
-        registry,
-        Arc::new(SecurityPolicy::default()),
-        secrets,
-        queue.clone(),
-        McpMetering::off(),
-        Default::default(),
-    );
+    let tool = native_call_tool(&[d]);
 
     let result = tool
         .execute(json!({ "server": "fixture", "tool": "echo", "arguments": {} }))
@@ -340,33 +260,19 @@ async fn oc_call_tool_scrubs_reflected_credential() {
     let out = serde_json::to_string(&result).unwrap();
     assert!(
         !out.contains(CANARY),
-        "OcMcpCallTool result leaked the reflected credential: {out}"
-    );
-
-    // The drained failure is recorded, classified, and scrubbed.
-    let failures = queue.drain();
-    assert_eq!(failures.len(), 1, "the failure was queued");
-    assert_eq!(failures[0].server, "fixture");
-    assert_eq!(failures[0].status, "server_error");
-    let serialized = format!("{:?}", failures[0]);
-    assert!(
-        !serialized.contains(CANARY),
-        "the drained failure leaked the reflected credential: {serialized}"
+        "mcp_call_tool result leaked the reflected credential: {out}"
     );
 }
 
 /// A *successful* response that reflects the credential is scrubbed too.
 ///
-/// The failure path above was the only one scrubbed until tinymcp's
-/// `SecretScrubber` was applied to the success branch: a server echoing the
-/// bearer inside an ordinary `tools/call` result would otherwise hand it to the
-/// agent verbatim.
+/// A server echoing the bearer inside an ordinary `tools/call` result would
+/// otherwise hand it to the agent verbatim.
 #[tokio::test]
-async fn oc_call_tool_scrubs_a_credential_reflected_in_a_successful_result() {
+async fn native_call_tool_scrubs_a_credential_reflected_in_a_successful_result() {
     use axum::http::HeaderMap;
     use axum::routing::post;
     use axum::{Json, Router};
-    use oh::security::SecurityPolicy;
 
     async fn handler(headers: HeaderMap, Json(body): Json<Value>) -> Json<Value> {
         let id = body.get("id").cloned().unwrap_or(Value::Null);
@@ -402,16 +308,7 @@ async fn oc_call_tool_scrubs_a_credential_reflected_in_a_successful_result() {
     const CANARY: &str = "sk-canary-SUCCESS-4242";
     let mut d = decl("fixture", &format!("http://{addr}/mcp"));
     d.auth = AuthMaterial::Bearer(CANARY.into());
-    let secrets = granted_secrets(std::slice::from_ref(&d), &grants(&["mcp:*"]));
-    let registry = registry_for_agent(&[d], &grants(&["mcp:*"])).expect("registry");
-    let tool = OcMcpCallTool::new(
-        registry,
-        Arc::new(SecurityPolicy::default()),
-        secrets,
-        McpFailureQueue::default(),
-        McpMetering::off(),
-        Default::default(),
-    );
+    let tool = native_call_tool(&[d]);
 
     let result = tool
         .execute(json!({ "server": "fixture", "tool": "echo", "arguments": {} }))
@@ -426,148 +323,6 @@ async fn oc_call_tool_scrubs_a_credential_reflected_in_a_successful_result() {
     assert!(
         !out.contains(CANARY),
         "a successful result leaked the credential: {out}"
-    );
-}
-
-/// A completed MCP call is counted, and a failed one is not (issue #698).
-///
-/// The rule this exercises — `mcp:` namespacing — is unit-tested in
-/// `crate::metering::oauth`. What only this test can reach is the wiring:
-/// that the success branch calls the meter at all, that it passes *this*
-/// company and agent rather than a default, and that the failure branch
-/// stays silent. Deleting the `if let Some(meter)` block, moving it to the
-/// `Err` arm, or threading the wrong field all pass every other test in the
-/// tree.
-///
-/// Both outcomes are driven through one fixture whose `tools/call` succeeds
-/// or fails on the tool name, because "counts a success" is only half the
-/// contract: `connections` is the count of providers seen, so a metered
-/// failure would mint a connection row for a server that never answered.
-#[tokio::test]
-async fn a_completed_mcp_call_is_metered_and_a_failed_one_is_not() {
-    use axum::extract::State;
-    use axum::routing::post;
-    use axum::{Json, Router};
-    use std::sync::Mutex;
-
-    use crate::ports::usage::{SampleKind, UsageMeter, UsageSample};
-
-    #[derive(Default)]
-    struct RecordingMeter {
-        samples: Mutex<Vec<(String, UsageSample)>>,
-    }
-
-    #[async_trait]
-    impl UsageMeter for RecordingMeter {
-        async fn record(&self, company: &CompanyId, sample: &UsageSample) -> crate::Result<()> {
-            self.samples
-                .lock()
-                .unwrap()
-                .push((company.to_string(), sample.clone()));
-            Ok(())
-        }
-        async fn query(
-            &self,
-            _company: &CompanyId,
-            _since: u64,
-        ) -> crate::Result<Vec<UsageSample>> {
-            Ok(Vec::new())
-        }
-    }
-
-    async fn handler(State(()): State<()>, Json(body): Json<Value>) -> axum::response::Response {
-        use axum::response::IntoResponse;
-        let id = body.get("id").cloned().unwrap_or(Value::Null);
-        let method = body.get("method").and_then(Value::as_str).unwrap_or("");
-        match method {
-            "initialize" => Json(json!({
-                "jsonrpc": "2.0", "id": id,
-                "result": { "protocolVersion": "2025-11-25", "capabilities": {},
-                            "serverInfo": { "name": "fixture", "version": "0" } }
-            }))
-            .into_response(),
-            "tools/list" => Json(json!({
-                "jsonrpc": "2.0", "id": id,
-                "result": { "tools": [
-                    { "name": "echo", "description": "e", "inputSchema": { "type": "object" } },
-                    { "name": "boom", "description": "b", "inputSchema": { "type": "object" } }
-                ] }
-            }))
-            .into_response(),
-            "tools/call" => {
-                let called = body
-                    .get("params")
-                    .and_then(|p| p.get("name"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                if called == "boom" {
-                    return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "boom").into_response();
-                }
-                Json(json!({
-                    "jsonrpc": "2.0", "id": id,
-                    "result": { "content": [{ "type": "text", "text": "ok" }] }
-                }))
-                .into_response()
-            }
-            _ => Json(json!({ "jsonrpc": "2.0" })).into_response(),
-        }
-    }
-
-    let app = Router::new().route("/mcp", post(handler)).with_state(());
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-
-    let endpoint = format!("http://{addr}/mcp");
-    let registry =
-        registry_for_agent(&[decl("fixture", &endpoint)], &grants(&["mcp:*"])).expect("registry");
-
-    let meter = Arc::new(RecordingMeter::default());
-    let tool = OcMcpCallTool::new(
-        registry,
-        Arc::new(SecurityPolicy::default()),
-        Vec::new(),
-        McpFailureQueue::default(),
-        McpMetering {
-            company: CompanyId::new("acme"),
-            agent: "ceo".to_string(),
-            meter: Some(meter.clone()),
-        },
-        Default::default(),
-    );
-
-    let ok = tool
-        .execute(json!({ "server": "fixture", "tool": "echo", "arguments": {} }))
-        .await
-        .expect("mcp_call_tool");
-    assert!(!ok.is_error, "the fixture's `echo` succeeds: {ok:?}");
-
-    {
-        let samples = meter.samples.lock().unwrap();
-        assert_eq!(samples.len(), 1, "one completed call, one sample");
-        let (company, sample) = &samples[0];
-        assert_eq!(company, "acme", "the sample is scoped to this company");
-        assert_eq!(sample.agent, "ceo", "attributed to the calling agent");
-        assert_eq!(sample.kind, SampleKind::OauthCall);
-        // Namespaced, so this row cannot merge with a Composio toolkit that
-        // happens to share the server's name.
-        assert_eq!(sample.provider, "mcp:fixture");
-        assert_eq!(sample.input_tokens, 0);
-        assert_eq!(sample.output_tokens, 0);
-        assert_eq!(sample.cost_usd, 0.0);
-    }
-
-    let failed = tool
-        .execute(json!({ "server": "fixture", "tool": "boom", "arguments": {} }))
-        .await
-        .expect("mcp_call_tool");
-    assert!(failed.is_error, "the fixture's `boom` fails: {failed:?}");
-    assert_eq!(
-        meter.samples.lock().unwrap().len(),
-        1,
-        "a call that never reached the server must not mint a connection row"
     );
 }
 
@@ -629,7 +384,7 @@ async fn query_param_auth_appends_to_existing_query_on_the_wire() {
         name: "apiKey".into(),
         value: "qp-secret-abc".into(),
     };
-    let registry = registry_for_agent(&[d], &grants(&["mcp:*"])).expect("registry");
+    let registry = registry_from_decls(&[d]);
     // list_tools drives initialize + tools/list over the wire.
     let _ = registry
         .list_tools("browserbase")
