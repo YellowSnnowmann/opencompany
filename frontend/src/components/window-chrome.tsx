@@ -29,12 +29,17 @@ import { isDesktopRuntime } from "@/api/transport";
 /**
  * Height of the reserved strip, in px, and the height of the drag band.
  *
- * It is the macOS traffic-light zone: 28px clears the three buttons at their
- * standard size with a hair of margin. `trafficLightPosition.y` in
+ * It is the macOS traffic-light zone. 28px (this constant's prior value) was
+ * tuned for an older macOS traffic-light size/spacing; on current macOS the
+ * lights sit lower and need more room, so this row's icons centred noticeably
+ * above them (operator-observed misalignment, not visually re-verifiable from
+ * this sandbox — see `trafficLightPosition` in `tauri.conf.json`). 38px is the
+ * value most third-party apps running a hidden/overlay title bar on current
+ * macOS use for exactly this strip. `trafficLightPosition.y` in
  * `tauri.conf.json` is tuned against this number — see the note there — so the
  * two move together or the lights sit off-centre in their own strip.
  */
-export const WINDOW_CHROME_HEIGHT = 28;
+export const WINDOW_CHROME_HEIGHT = 38;
 
 /**
  * How far into the window the traffic lights reach, in px.
