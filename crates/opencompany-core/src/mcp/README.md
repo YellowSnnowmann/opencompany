@@ -16,18 +16,20 @@ Design docs: [MCP servers](../../../../docs/modules/mcp.md),
 | `decl/mod.rs` | ungated | `McpServerDecl`, `AuthMaterial`, `McpHealth`, secret-store keys, and the three-layer merge `effective_mcp_servers`. Also reachable as `company::mcp`. |
 | `decl/store.rs` | ungated | Runtime index, credential and health reads/writes, and `resolve_effective`. |
 | `decl/validate.rs` | ungated | Declaration validation (HTTP only, reserved names, endpoint credentials) and default-server normalization. |
-| `decl/file.rs` | ungated | The bundle's `mcp.json`. |
+| `decl/file.rs` | ungated | The bundle's `mcp.json`, read through tinymcp's `config_doc::parse_with` with this host's fields registered. |
 | `decl/endpoint.rs` | ungated | The rule for whether two records name the same server. |
 | `decl/server_info.rs` | ungated | What a server says about itself (`serverInfo`), and its icon. |
 | `decl/families.rs` | ungated | The persona brief naming which dispatch tool reaches which server. |
 | `policy/mod.rs` | ungated | Per-tool approval policy: tiers, stored overrides, inventory, the allow set. |
 | `policy/agent.rs` | ungated | Per-agent narrowing of that policy. |
-| `probe.rs` | `openhuman` | Probing a declared server, classifying failures, `McpFailureQueue`. |
+| `probe.rs` | `openhuman` | Probing a declared server, classifying failures, including a call's structured outcome (`classify_call_error`). |
+| `observe.rs` | `openhuman` | `McpCallObserver` / `AgentMcpObserver`: a turn's MCP call outcomes into `OauthCall` metering and the failures the brain drains. |
 | `runtime.rs` | `openhuman` | `McpRuntime`: the company-scoped registry store, directory search, installs, connections. |
 | `agent/mod.rs` | `openhuman` | Spec attachments (`embed_servers_for_agent`), the capability brief, live discovery. |
 | `agent/resolve.rs` | `openhuman` | `resolve_for_agent` → `AgentMcp`: one agent's attachments, registry tools, bridge names and brief. |
 | `agent/registry_list.rs` | `openhuman` | `mcp_registry_installed_list`, filtered by the agent's grants. |
 | `agent/registry_scoped.rs` | `openhuman` | `OcMcpRegistryScopedTool`: grant and per-tool policy checks before a registry tool runs. |
+| `agent/registry_outcome.rs` | `openhuman` | The `McpCallOutcome` a `mcp_registry_tool_call` result carries. |
 
 Tests sit beside each file as `<stem>_tests.rs`. `agent/agent_turn_tests.rs`
 drives a live harness turn and needs the `mcp` feature; the CI `mcp-module`

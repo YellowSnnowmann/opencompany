@@ -35,6 +35,15 @@ its `manifest` badge):
    # auth_secret = "mcp/notion/auth"   # optional; names a SecretStore key
    ```
 
+   A bundle may also ship its servers as `companies/<name>/mcp.json`, in the
+   `mcpServers` shape. It is read by tinymcp's `config_doc::parse_with` in
+   lenient mode, with `endpoint`, `readOnlyTools`, `authSecret` and `$comment`
+   registered as host fields ([`mcp::decl::file`](../../src/mcp/decl/file.rs)).
+   An entry tinymcp refuses — an unknown field, a wrong type — is dropped and
+   reported as a manifest problem without costing its siblings; an inline
+   `headers` block or a query-string credential is refused because the file is
+   committed.
+
 2. **Runtime** — servers the operator adds through the console, persisted as a
    single JSON index in the [`SecretStore`](../../src/ports/secrets.rs) under
    `mcp/servers`.
@@ -102,6 +111,43 @@ agent's first move.
 The classifications remain declared in
 [`policy::consequence`](../../src/policy/consequence.rs) for audit and for a
 future policy-HITL mode.
+
+## What a call reports back
+
+Every `mcp_call_tool` result carries tinymcp's `McpCallOutcome` as host-only
+metadata (`{kind: "mcp_call", server, tool, ok, error?}`), which OpenHuman
+forwards on the turn's completed-call events. After each turn the agent's
+`AgentMcpObserver` ([`mcp::observe`](../../src/mcp/observe.rs)) reads them:
+
+- **`ok: true`** — the server answered, even if the remote tool returned its own
+  error. One `OauthCall` usage sample is recorded under `mcp:<server>`.
+- **`ok: false`** — the call failed before an answer: a 401, a transport error,
+  a non-MCP reply, a JSON-RPC rejection. It is classified by
+  `probe::classify_call_error` into the same status codes a probe uses
+  (`credential_required`, `oauth_required`, `token_rejected`, `unreachable`, …),
+  scrubbed against the server's credentials, and recorded on the company's
+  `McpCallObserver`. The brain drains it onto the operator bubble as a red
+  `MCP: <server> unavailable` step and journals a `McpCallFailed` event,
+  stamped with the task id on a dispatched card.
+- **Refusals** — a blocked tool (`ToolNotAllowed`) or malformed arguments — are
+  neither metered nor surfaced; the agent reads the refusal in its result.
+
+The registry bridge's `mcp_registry_tool_call` carries the same outcome (see
+[Directory-installed MCP servers](mcp-registry.md)), so both bridges meter and
+surface alike.
+
+## Signing in with OAuth
+
+`POST …/mcp/servers/{name}/oauth/start` and the unauthenticated
+`/oauth/mcp/callback` run tinymcp's `OAuthFlow` with
+`require_public_endpoints`: discovery, dynamic client registration, PKCE and the
+code exchange, every discovery-supplied endpoint refused unless it is `https` on
+a public address. One flow per host holds the parked sign-ins, keyed by
+`state` under `<company>/<server>`, and sweeps abandoned ones after ten minutes.
+The minted token is stored through `store_auth` as `AuthMaterial::OAuth`, and
+the harness refreshes a near-expiry one through `OAuthFlow::refresh`, which
+re-checks the stored token endpoint
+([`company::mcp_oauth`](../../src/company/mcp_oauth.rs)).
 
 ## Per-tool permissions
 

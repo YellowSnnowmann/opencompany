@@ -169,6 +169,14 @@ which decides whether these tools are wired at all — accepts only a grant root
 at `mcp_registry`, and the scoping predicate matches it, so the two gates cannot
 come to disagree about what confers the namespace.
 
+A `mcp_registry_tool_call` result also carries the same `McpCallOutcome` the
+native `mcp_call_tool` attaches: answered when the install replied, failed with
+the error's wire code when the vendored tool reports a string error body, and
+`ToolNotAllowed` on the decorator's own refusals. The MCP call observer reads it
+like any other call, so a directory install's answered calls are metered as
+`OauthCall` under `mcp:<server_id>` and its failures reach the operator bubble
+and the journal — see [What a call reports back](mcp.md#what-a-call-reports-back).
+
 ### The agent learns which installs exist from an allowlist
 
 A `server_id` has to come from somewhere, so `mcp_registry_installed_list` is
