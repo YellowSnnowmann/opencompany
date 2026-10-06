@@ -22,6 +22,14 @@ import { SidebarTitleRow } from "@/components/sidebar-title-row";
 let host: HTMLDivElement;
 let root: Root | null = null;
 
+// `navigator.platform` is a shared global `defineProperty` can only override,
+// never scope to one test — jsdom defines it on the prototype, so `asDesktop`
+// shadows that with an own property on `navigator` itself. Restoring means
+// deleting that own property in `afterEach` below, not redefining it, so the
+// prototype's own getter answers again rather than leaking "MacIntel" into
+// whatever runs next in this worker (tinysweeper, medium).
+const hadOwnPlatform = Object.prototype.hasOwnProperty.call(navigator, "platform");
+
 /** Present the runtime as the Tauri desktop, on the given platform. */
 function asDesktop(platform: string) {
   (window as unknown as Record<string, unknown>).__TAURI__ = {};
@@ -29,6 +37,11 @@ function asDesktop(platform: string) {
     configurable: true,
     value: platform,
   });
+}
+
+/** Undoes `asDesktop`'s override, leaving `navigator.platform` as it was. */
+function restorePlatform() {
+  if (!hadOwnPlatform) delete (navigator as unknown as Record<string, unknown>).platform;
 }
 
 function render(node: Parameters<Root["render"]>[0]) {
@@ -47,6 +60,7 @@ afterEach(() => {
   root = null;
   host.remove();
   delete (window as unknown as Record<string, unknown>).__TAURI__;
+  restorePlatform();
 });
 
 function click(el: Element | null) {
