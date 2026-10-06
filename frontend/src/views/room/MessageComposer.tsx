@@ -829,15 +829,14 @@ export function MessageComposer({
             aria-label={placeholder}
             placeholder={placeholder}
             rows={1}
-            // `outline-none` drops the native outline unconditionally — the
-            // container's own `focus-within` ring used to be the only visible
-            // indicator this left behind, so removing that ring (above) left
-            // keyboard focus with no indicator at all. `focus-visible` rather
-            // than `focus`, so a mouse click into the textarea stays exactly
-            // as quiet as the container redesign intended; only keyboard
-            // focus gets the ring back (CodeRabbit learning: an outline
-            // removed without a visible alternative).
-            className="field-sizing-content max-h-48 min-h-9 flex-1 resize-none rounded-sm bg-transparent px-1 py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+            // `outline-none` drops the native outline unconditionally, and no
+            // ring replaces it, by explicit operator request: the composer
+            // stays quiet on focus, full stop (a `focus-visible` ring was
+            // tried here to keep a CodeRabbit-flagged keyboard-focus
+            // indicator, but WebKit/most UAs treat a text field's
+            // `:focus-visible` as matching on pointer focus too, not just
+            // keyboard, so it fired on every click anyway).
+            className="field-sizing-content max-h-48 min-h-9 flex-1 resize-none rounded-sm bg-transparent px-1 py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground"
           />
           <Button
             size="icon"
