@@ -469,3 +469,105 @@ async fn without_a_store_the_grant_is_the_whole_gate() {
     assert!(!result.is_error, "{}", result.text());
     assert_eq!(calls.lock().unwrap().len(), 1);
 }
+
+/// An inner registry call tool whose call fails before the server answers,
+/// in the body shape the vendored registry tool reports it with.
+struct Unauthorized;
+
+#[async_trait]
+impl Tool for Unauthorized {
+    fn name(&self) -> &str {
+        "mcp_registry_tool_call"
+    }
+
+    fn description(&self) -> &str {
+        "fixture: a registry call the server refuses with 401"
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({ "type": "object" })
+    }
+
+    async fn execute(&self, _args: Value) -> anyhow::Result<ToolResult> {
+        Ok(ToolResult::success(
+            json!({
+                "result": "mcp unauthorized for `https://x.test/mcp` (HTTP 401)",
+                "is_error": true
+            })
+            .to_string(),
+        ))
+    }
+}
+
+fn completed(result: &ToolResult) -> openhuman_core::agent::progress::AgentProgress {
+    openhuman_core::agent::progress::AgentProgress::ToolCallCompleted {
+        call_id: "c".to_string(),
+        tool_name: "mcp_registry_tool_call".to_string(),
+        success: !result.is_error,
+        output_chars: 0,
+        output: result.output(),
+        arguments: None,
+        elapsed_ms: 1,
+        iteration: 1,
+        failure: None,
+        display_label: None,
+        display_detail: None,
+        structured: result.metadata.clone(),
+    }
+}
+
+#[tokio::test]
+async fn a_delegated_registry_call_is_an_answered_call_for_the_observer() {
+    let (_calls, tool) = wrap(&["mcp_registry"]);
+    let result = tool
+        .execute(json!({ "server_id": INSTALL_A, "tool_name": "echo" }))
+        .await
+        .unwrap();
+    let outcome =
+        tinymcp::McpCallOutcome::from_metadata(result.metadata.as_ref().unwrap()).unwrap();
+    assert!(outcome.ok);
+    assert_eq!(outcome.server, INSTALL_A);
+    assert_eq!(outcome.tool, "echo");
+}
+
+#[tokio::test]
+async fn an_ungranted_registry_call_is_a_refusal_the_observer_ignores() {
+    let (calls, tool) = wrap(&[&format!("mcp_registry.{INSTALL_B}")]);
+    let result = tool
+        .execute(json!({ "server_id": INSTALL_A, "tool_name": "echo" }))
+        .await
+        .unwrap();
+    assert!(logged(&calls).is_empty());
+    let outcome =
+        tinymcp::McpCallOutcome::from_metadata(result.metadata.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        outcome.error.unwrap().code,
+        tinymcp::tinymcp_bus::errors::TOOL_NOT_ALLOWED
+    );
+    let sink = crate::mcp::observe::McpCallObserver::default();
+    let observer = sink.for_agent(company(), AGENT, None, Vec::new());
+    assert!(observer.observe(&[completed(&result)]).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_failed_registry_call_reaches_the_observer_like_a_native_one() {
+    let tool = OcMcpRegistryScopedTool::new(
+        Box::new(Unauthorized),
+        AGENT.to_string(),
+        grants(&["mcp_registry"]),
+        company(),
+        None,
+    );
+    let result = tool
+        .execute(json!({ "server_id": INSTALL_A, "tool_name": "echo" }))
+        .await
+        .unwrap();
+    let sink = crate::mcp::observe::McpCallObserver::default();
+    let observer = sink.for_agent(company(), AGENT, None, Vec::new());
+    let failures = observer.observe(&[completed(&result)]).await;
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert_eq!(failures[0].server, INSTALL_A);
+    assert_eq!(failures[0].tool, "echo");
+    assert_eq!(failures[0].status, "credential_required");
+    assert_eq!(sink.drain(), failures);
+}

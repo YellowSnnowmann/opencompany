@@ -21,11 +21,11 @@ use crate::harness::orchestrator::{DelegationQueue, WorkflowRunnerHandle};
 use crate::harness::policy::ApprovalRequestQueue;
 use crate::harness::provider::{HostedProvider, HostedProviderConfig};
 use crate::harness::{HarnessDeps, HarnessPool};
+use crate::mcp::observe::McpCallObserver;
 use crate::mcp::policy::{
     AgentToolPolicies, ApprovalMode, McpToolInventory, McpToolPolicies, ToolPolicy, ToolTier,
     save_tool_inventory, save_tool_policies, tool_inventory_key, tool_policies_key,
 };
-use crate::mcp::probe::McpFailureQueue;
 use crate::ports::SecretStore;
 use crate::ports::types::{CompanyId, CompanyRecord, SecretValue};
 use crate::runtime::delegation::ChatTarget;
@@ -88,7 +88,9 @@ async fn spawn_model() -> (String, Arc<Script>) {
                     .flatten()
                     .map(str::trim);
                 let message = match call {
-                    Some(tool) => json!({
+                    Some(call) => {
+                        let (tool, server) = call.split_once('@').unwrap_or((call, SERVER));
+                        json!({
                         "role": "assistant",
                         "content": null,
                         "tool_calls": [{
@@ -97,13 +99,14 @@ async fn spawn_model() -> (String, Arc<Script>) {
                             "function": {
                                 "name": "mcp_call_tool",
                                 "arguments": json!({
-                                    "server": SERVER,
+                                    "server": server,
                                     "tool": tool,
                                     "arguments": {}
                                 }).to_string()
                             }
                         }]
-                    }),
+                        })
+                    }
                     None => json!({ "role": "assistant", "content": "done" }),
                 };
                 Json(json!({
@@ -265,7 +268,7 @@ fn deps(model_url: String, dir: &std::path::Path, secrets: Arc<MemorySecrets>) -
         events: None,
         delegations: DelegationQueue::default(),
         workflow_runner: WorkflowRunnerHandle::default(),
-        mcp_failures: McpFailureQueue::default(),
+        mcp_failures: McpCallObserver::default(),
         pending_publishes: crate::harness::publish::PendingPublishQueue::default(),
         workflow_refs: crate::harness::workflow_refs::WorkflowRefQueue::default(),
         run_outputs: crate::harness::orchestrator::RunOutputCache::default(),
@@ -451,4 +454,106 @@ async fn a_per_agent_block_refuses_on_a_live_turn_and_lifts_without_a_restart() 
             .contains(&format!("ok:{BLOCKED}")),
         "the lifted call's result must reach the model"
     );
+}
+
+const LOCKED: &str = "locked";
+
+async fn spawn_locked_server() -> String {
+    let app = axum::Router::new().route(
+        "/mcp",
+        post(|| async {
+            (
+                axum::http::StatusCode::UNAUTHORIZED,
+                [("www-authenticate", "Bearer realm=\"mcp\"")],
+                "",
+            )
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    format!("http://{addr}/mcp")
+}
+
+#[derive(Default)]
+struct RecordingMeter {
+    samples: Mutex<Vec<crate::ports::UsageSample>>,
+}
+
+#[async_trait::async_trait]
+impl crate::ports::UsageMeter for RecordingMeter {
+    async fn record(
+        &self,
+        _company: &CompanyId,
+        sample: &crate::ports::UsageSample,
+    ) -> crate::Result<()> {
+        self.samples.lock().unwrap().push(sample.clone());
+        Ok(())
+    }
+    async fn query(
+        &self,
+        _company: &CompanyId,
+        _since: u64,
+    ) -> crate::Result<Vec<crate::ports::UsageSample>> {
+        Ok(self.samples.lock().unwrap().clone())
+    }
+}
+
+#[tokio::test]
+async fn a_live_turn_meters_answered_calls_and_records_failed_ones() {
+    let (model_url, _script) = spawn_model().await;
+    let (endpoint, server) = spawn_mcp_server().await;
+    let locked = spawn_locked_server().await;
+    let dir = tempfile::tempdir().unwrap();
+    let secrets = Arc::new(MemorySecrets::default());
+    let mut manifest = manifest(&endpoint);
+    manifest.mcp_servers.push(
+        toml::from_str(&format!("name = \"{LOCKED}\"\nendpoint = \"{locked}\"\n"))
+            .expect("server parses"),
+    );
+    let record = record(manifest);
+    let meter = Arc::new(RecordingMeter::default());
+    let mut deps = deps(model_url, dir.path(), secrets);
+    deps.meter = Some(meter.clone());
+    let pool = HarnessPool::new();
+
+    turn(&pool, &record, &deps, "writer", ALLOWED).await;
+    assert_eq!(server.calls_to(ALLOWED), 1);
+    let samples = meter.samples.lock().unwrap().clone();
+    let mcp_calls: Vec<_> = samples
+        .iter()
+        .filter(|sample| sample.kind == crate::ports::SampleKind::OauthCall)
+        .collect();
+    assert_eq!(mcp_calls.len(), 1, "{samples:?}");
+    assert_eq!(mcp_calls[0].agent, "writer");
+    assert_eq!(mcp_calls[0].provider, crate::metering::mcp_provider(SERVER));
+    assert_eq!(
+        deps.mcp_failures.queued(),
+        0,
+        "an answered call is no failure"
+    );
+
+    turn(
+        &pool,
+        &record,
+        &deps,
+        "writer",
+        &format!("{ALLOWED}@{LOCKED}"),
+    )
+    .await;
+    let failures = deps.mcp_failures.drain();
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert_eq!(failures[0].server, LOCKED);
+    assert_eq!(failures[0].tool, ALLOWED);
+    assert_eq!(failures[0].status, "credential_required");
+    let oauth_calls = meter
+        .samples
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|sample| sample.kind == crate::ports::SampleKind::OauthCall)
+        .count();
+    assert_eq!(oauth_calls, 1, "a failed call is not metered");
 }
