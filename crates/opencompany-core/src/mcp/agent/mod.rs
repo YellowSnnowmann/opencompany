@@ -216,3 +216,7 @@ mod tests;
 #[cfg(test)]
 #[path = "agent_blocked_tests.rs"]
 mod blocked_tests;
+
+#[cfg(all(test, feature = "mcp"))]
+#[path = "agent_turn_tests.rs"]
+mod turn_tests;
