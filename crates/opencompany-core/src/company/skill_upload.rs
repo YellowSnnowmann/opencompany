@@ -334,7 +334,7 @@ fn decode(bytes: &[u8]) -> Result<String, String> {
 
 /// The `name` scalar from a document's frontmatter, when it has one.
 fn frontmatter_name(doc: &str) -> Option<String> {
-    let (frontmatter, _) = super::skill_file::split_frontmatter(doc)?;
+    let (frontmatter, _) = tinyskills::split_frontmatter(doc)?;
     frontmatter.lines().find_map(|line| {
         let (key, value) = line.trim().split_once(':')?;
         (key.trim().eq_ignore_ascii_case("name") && !value.trim().is_empty())

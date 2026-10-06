@@ -15,8 +15,9 @@
 //! Document *size* is bounded separately, on the assembled `SKILL.md`, by the
 //! write plane's own ceiling; this module adds no second bound for it.
 
-use super::skill_file::{SkillDoc, parse_skill_md, split_frontmatter};
+use super::skill_file::{SkillDoc, parse_skill_md};
 use crate::error::OpenCompanyError;
+use tinyskills::split_frontmatter;
 
 /// The longest a skill slug may be, in characters.
 ///

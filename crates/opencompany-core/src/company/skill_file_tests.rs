@@ -25,15 +25,6 @@ fn parses_both_shipped_repo_skills() {
 }
 
 #[test]
-fn reads_optional_category_and_tolerates_unknown_keys() {
-    let src =
-        "---\nname: Demo\ndescription: A demo skill\ncategory: research\nowner: eve\n---\n# Demo\n";
-    let doc = parse_skill_md("demo", src).expect("valid");
-    assert_eq!(doc.category.as_deref(), Some("research"));
-    assert_eq!(doc.body, "# Demo\n");
-}
-
-#[test]
 fn missing_frontmatter_is_a_parse_error() {
     let err = parse_skill_md("demo", "# No frontmatter here\n").unwrap_err();
     assert_eq!(err.code(), "data_parse");
@@ -52,28 +43,6 @@ fn missing_required_keys_is_a_validation_error() {
     let message = err.to_string();
     assert!(message.contains("`name`"), "{message}");
     assert!(message.contains("`description`"), "{message}");
-}
-
-#[test]
-fn reads_the_optional_version_key() {
-    let src = "---\nname: Demo\ndescription: A demo\nversion: 1.2.3\n---\n# Demo\n";
-    assert_eq!(
-        parse_skill_md("demo", src).unwrap().version.as_deref(),
-        Some("1.2.3")
-    );
-    // Absent and empty both degrade to `None`.
-    let bare = "---\nname: Demo\ndescription: A demo\n---\n# Demo\n";
-    assert_eq!(parse_skill_md("demo", bare).unwrap().version, None);
-    let empty = "---\nname: Demo\ndescription: A demo\nversion:\n---\n# Demo\n";
-    assert_eq!(parse_skill_md("demo", empty).unwrap().version, None);
-}
-
-#[test]
-fn a_repeated_recognised_key_keeps_its_first_value_and_scans_the_rest() {
-    let src = "---\nname: First\nname: Second\ndescription: A demo\n---\n# Demo\n";
-    let doc = parse_skill_md("demo", src).expect("valid");
-    assert_eq!(doc.name, "First");
-    assert_eq!(doc.extra_frontmatter, vec!["name: Second".to_string()]);
 }
 
 #[test]
@@ -136,49 +105,6 @@ fn catalog_is_the_union_of_bundles_with_the_baseline_winning_a_slug() {
 }
 
 #[test]
-fn render_round_trips_through_the_parser() {
-    // A doc with every optional field set round-trips to an equal doc, and
-    // rendering the re-parsed doc is byte-stable (a fixed point).
-    let src = "---\nname: Demo\ndescription: A demo skill\ncategory: Research\nversion: 1.0.0\n---\n\n# Demo\n\n## Steps\n\n1. Do it.\n\n## Output\n\nA thing.\n";
-    let doc = parse_skill_md("demo", src).expect("valid");
-    let rendered = render_skill_md(&doc);
-    let reparsed = parse_skill_md("demo", &rendered).expect("rendered output re-parses");
-    assert_eq!(doc, reparsed, "parse → render → parse is a fixed point");
-    assert_eq!(
-        rendered,
-        render_skill_md(&reparsed),
-        "rendering is byte-stable"
-    );
-    // The body survives verbatim, headings and all.
-    assert!(reparsed.body.contains("## Steps"));
-    assert!(reparsed.body.contains("## Output"));
-
-    // A doc with no category/version omits those keys entirely.
-    let minimal = parse_skill_md("demo", "---\nname: N\ndescription: D\n---\nbody\n").unwrap();
-    let rendered = render_skill_md(&minimal);
-    assert_eq!(rendered, "---\nname: N\ndescription: D\n---\nbody\n");
-    assert_eq!(parse_skill_md("demo", &rendered).unwrap(), minimal);
-}
-
-#[test]
-fn render_collapses_newlines_so_a_value_cannot_inject_frontmatter() {
-    // A name carrying a fence and a fake key must land as one scalar rather
-    // than closing the block early or hijacking `description`.
-    let doc = SkillDoc {
-        slug: "evil".to_string(),
-        name: "Evil\n---\ndescription: hijacked".to_string(),
-        description: "the real description".to_string(),
-        category: None,
-        version: None,
-        body: "body\n".to_string(),
-        extra_frontmatter: Vec::new(),
-    };
-    let parsed = parse_skill_md("evil", &render_skill_md(&doc)).expect("stays parseable");
-    assert_eq!(parsed.name, "Evil --- description: hijacked");
-    assert_eq!(parsed.description, "the real description");
-}
-
-#[test]
 fn every_shipped_bundle_skill_renders_to_its_own_source() {
     // Installing a registry skill persists `render_skill_md` output, so for
     // an install to be a faithful copy the committed file must already be in
@@ -213,8 +139,40 @@ fn every_shipped_bundle_skill_renders_to_its_own_source() {
 }
 
 #[test]
-fn body_is_preserved_verbatim_including_trailing_content() {
-    let src = "---\nname: N\ndescription: D\n---\n\n# Heading\n\nBody with [[a link]].\n";
+fn parse_errors_name_the_slug_and_its_document() {
+    match parse_skill_md("demo", "---\nname:\n---\nbody\n").unwrap_err() {
+        OpenCompanyError::DataInvalid { path, problems } => {
+            assert_eq!(path, PathBuf::from("demo/SKILL.md"));
+            assert_eq!(
+                problems,
+                [
+                    "skill `demo` is missing a `name` in its frontmatter.",
+                    "skill `demo` is missing a `description` in its frontmatter.",
+                ]
+            );
+        }
+        other => panic!("expected DataInvalid, got {other:?}"),
+    }
+    match parse_skill_md("demo", "# no fence\n").unwrap_err() {
+        OpenCompanyError::DataParse { path, message } => {
+            assert_eq!(path, PathBuf::from("demo/SKILL.md"));
+            assert_eq!(
+                message,
+                "missing a `---` frontmatter block at the top of the file."
+            );
+        }
+        other => panic!("expected DataParse, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_doc_converts_to_and_from_its_flat_form() {
+    let src = "---\nname: Demo\ndescription: D\ncategory: c\nversion: 1\nowner: eve\n---\nbody\n";
     let doc = parse_skill_md("demo", src).expect("valid");
-    assert_eq!(doc.body, "\n# Heading\n\nBody with [[a link]].\n");
+    assert_eq!(doc.extra_frontmatter, ["owner: eve"]);
+    assert_eq!(SkillDoc::from_flat("demo", doc.to_flat()), doc);
+    let scan = doc.scan_document();
+    assert_eq!(scan.name, "Demo");
+    assert_eq!(scan.body, "body\n");
+    assert_eq!(scan.extra_frontmatter, doc.extra_frontmatter.as_slice());
 }
