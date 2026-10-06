@@ -106,7 +106,7 @@ pub(crate) fn grant_matches(grant: &str, tool: &str) -> bool {
 /// Whether an agent's effective tool `grants` cover the MCP server named `name`,
 /// using the same glob semantics as every other grant (`mcp:*` grants all,
 /// `mcp:notion` is exact). The single primitive read by both the harness's
-/// per-agent registry assembly (`registry_for_agent`) and the console's
+/// per-agent server attachment (`resolve_for_agent`) and the console's
 /// reachability view (issue #568), so the two can never disagree about which
 /// agents reach a server. `grants` are the *effective* grants — resolve them
 /// with [`agent_effective_grants`](crate::runtime::builder::agent_effective_grants)
@@ -134,7 +134,7 @@ pub(crate) fn grants_cover_server(grants: &[String], name: &str) -> bool {
 /// Serves two shapes of caller. A tool addressed by a `server_id` argument
 /// gates on this before dispatching; a tool that *enumerates* installs carries
 /// no such argument and must instead filter its rows through this, the way
-/// `registry_for_agent` filters declared servers with
+/// `resolve_for_agent` filters declared servers with
 /// [`grants_cover_server`]. `grants` are the *effective* grants — resolve them
 /// with [`agent_effective_grants`](crate::runtime::builder::agent_effective_grants)
 /// first, never the raw per-agent `tools`.

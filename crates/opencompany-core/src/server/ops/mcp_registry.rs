@@ -230,8 +230,8 @@ pub(super) fn declaration_from_directory(
 /// the declared server exactly where it was.
 ///
 /// The deeper reason is that List A is what the *agents* actually reach.
-/// `registry_for_agent` builds each agent's MCP registry from the List A decls
-/// and scopes it by `mcp:<name>` grants; the row's `name`, `enabled`, tool lists
+/// `resolve_for_agent` attaches List A decls to each agent's spec, scoped by
+/// `mcp:<name>` grants; the row's `name`, `enabled`, tool lists
 /// and credential all govern that path. A row relabelled `registry` would stop
 /// offering the controls that decide what the company's agents can call.
 ///

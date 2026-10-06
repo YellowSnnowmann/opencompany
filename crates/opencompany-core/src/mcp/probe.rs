@@ -126,9 +126,8 @@ impl ProbeClass {
     }
 }
 
-/// One MCP tool-call failure observed during an agent turn, pushed onto the
-/// [`McpFailureQueue`] by [`crate::mcp::agent::OcMcpCallTool`] and drained by
-/// the [`HarnessBrain`](crate::harness::HarnessBrain) after the turn. Every
+/// One MCP tool-call failure observed during an agent turn, queued on the
+/// [`McpFailureQueue`] and drained by the [`HarnessBrain`](crate::harness::HarnessBrain) after the turn. Every
 /// string field is already scrubbed at construction — this is safe to persist,
 /// return, or show an operator.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -185,7 +184,7 @@ impl McpFailureQueue {
 /// `auth_configured` is whether the server has a stored credential — it
 /// disambiguates a bare 401 (credential required) from a rejected one (token
 /// rejected). `in_call_context` is true when the error came from a *tool call*
-/// (via [`crate::mcp::agent`]'s `OcMcpCallTool`) rather than a connect/probe;
+/// (`mcp_call_tool`) rather than a connect/probe;
 /// only then is a JSON-RPC `MCP error:` treated as a tool-call rejection.
 ///
 /// Order matters: the **typed** downcasts (401, reqwest) win over string arms so

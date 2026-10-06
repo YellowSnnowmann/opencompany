@@ -1375,9 +1375,8 @@ pub enum CompanyEvent {
     },
     /// An agent's MCP tool call failed during a turn, journaled by the harness
     /// so the operator has an audit trail of which server/tool broke and why.
-    /// The `message` is always **scrubbed** at the source (the
-    /// `OcMcpCallTool` → `HarnessBrain` drain path), so this record can never
-    /// carry a credential, response body, or URL query string. Additive: old
+    /// The `message` is always **scrubbed** before it is journaled, so this
+    /// record can never carry a credential, response body, or URL query string. Additive: old
     /// logs never contain it, and its presence doesn't change how any existing
     /// variant serializes (same `by`/`chat` precedent).
     McpCallFailed {

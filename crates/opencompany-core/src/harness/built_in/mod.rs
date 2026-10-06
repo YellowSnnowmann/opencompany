@@ -432,8 +432,7 @@ pub struct HarnessDeps {
     /// Default (and any build with no runner) leaves it empty and the tool
     /// reports workflow execution is not wired.
     pub workflow_runner: crate::harness::orchestrator::WorkflowRunnerHandle,
-    /// The shared MCP failure queue the `OcMcpCallTool` decorator pushes onto and
-    /// the [`HarnessBrain`] drains after a turn (the error-hardening cell). Same
+    /// The shared MCP failure queue the [`HarnessBrain`] drains after a turn. Same
     /// cheap-shared-handle pattern as [`Self::delegations`]; every string it
     /// carries is scrubbed at the source. Default is an empty queue.
     pub mcp_failures: McpFailureQueue,

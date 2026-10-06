@@ -2676,9 +2676,8 @@ impl HarnessBrain {
     ///
     /// One surface, one renderer, one scrub discipline: a silently-failed MCP
     /// call shows up as a red step in the same timeline as every other tool call
-    /// instead of a separate warning bubble. Every string was already scrubbed at
-    /// the source (`OcMcpCallTool`), so `scrubbed_message` is safe to show and to
-    /// persist.
+    /// instead of a separate warning bubble. Every string is scrubbed before it
+    /// is queued, so `scrubbed_message` is safe to show and to persist.
     ///
     /// `task_id` is the dispatched card the failing turn belonged to, when the
     /// drain runs inside a [`CompanyEvent::TaskDispatched`] cycle (issue #185).

@@ -454,7 +454,7 @@ pub(super) fn roster_grants(record: &CompanyRecord) -> Vec<(RosterAgentDto, Vec<
 /// the shared [`grants_cover_server`] so this agrees with the harness registry.
 /// Empty ⇒ no teammate can reach the server.
 ///
-/// A **disabled** server reaches nobody regardless of grants: `registry_for_agent`
+/// A **disabled** server reaches nobody regardless of grants: `resolve_for_agent`
 /// filters on `decl.enabled && grants_cover_server(..)`, so an agent granted
 /// `mcp:<slug>` still gets no such tool while the server is off. Mirroring both
 /// halves of that filter here is what keeps the console from claiming a

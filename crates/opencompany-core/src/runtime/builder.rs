@@ -3179,9 +3179,8 @@ impl RuntimeBuilder {
                                 // the runner without a construction cycle.
                                 workflow_runner:
                                     crate::harness::orchestrator::WorkflowRunnerHandle::default(),
-                                // Error-hardening cell: a fresh MCP-failure queue
-                                // the `OcMcpCallTool` decorator fills and the brain
-                                // drains; and a LIVE secret-store handle so
+                                // A fresh MCP-failure queue the brain drains; and a
+                                // LIVE secret-store handle so
                                 // `HarnessPool::ensure` can re-resolve the effective
                                 // MCP set each turn (MCP-freshness) rather than the
                                 // snapshot frozen here at boot.
