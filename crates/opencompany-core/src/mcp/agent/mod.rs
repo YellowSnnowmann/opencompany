@@ -25,6 +25,7 @@ use crate::company::mcp::{AuthMaterial, McpServerDecl};
 use crate::runtime::tools::grants_cover_server;
 
 mod registry_list;
+pub(crate) mod registry_outcome;
 mod registry_scoped;
 mod resolve;
 

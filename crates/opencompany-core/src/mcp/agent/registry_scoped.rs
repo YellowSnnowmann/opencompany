@@ -3,7 +3,10 @@
 //! The tools in `oh::mcp::registry::tools` address an install by a `server_id`
 //! argument supplied at call time, so being wired onto an agent's belt is not
 //! by itself a reach decision. [`OcMcpRegistryScopedTool`] resolves that
-//! argument against the agent's effective grants before delegating.
+//! argument against the agent's effective grants before delegating. A
+//! `mcp_registry_tool_call` result also carries the call's
+//! [`McpCallOutcome`](tinymcp::McpCallOutcome), as the native `mcp_call_tool`'s
+//! does, so the observer reads both bridges alike.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -16,11 +19,13 @@ use tinytools::{
     ToolScope, ToolTimeout,
 };
 
+use super::registry_outcome::{self, REGISTRY_CALL_TOOL};
 use crate::mcp::policy;
 use crate::policy::consequence::{MCP_REGISTRY_SERVER_KEY, MCP_REGISTRY_TOOL_KEY};
 use crate::ports::SecretStore;
 use crate::ports::types::CompanyId;
 use crate::runtime::tools::grants_cover_registry_server;
+use tinymcp::tinymcp_bus::errors::{INVALID_ARGUMENTS, TOOL_NOT_ALLOWED};
 
 /// Scopes a directory-installed MCP server tool to the agent's own installs.
 ///
@@ -95,26 +100,45 @@ impl OcMcpRegistryScopedTool {
     /// install is addressed by an argument, not by the grant the tool was wired
     /// under, so there is no build-time snapshot to attach one to.
     async fn authorize(&self, args: &Value) -> Option<ToolResult> {
-        let server_id = args
-            .get(MCP_REGISTRY_SERVER_KEY)
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|id| !id.is_empty());
+        let (server_id, tool_name) = addressed(args);
         let Some(id) = server_id else {
-            return Some(self.unaddressed());
+            return Some(self.refused(args, self.unaddressed(), INVALID_ARGUMENTS));
         };
         if !grants_cover_registry_server(&self.grants, id) {
-            return Some(self.denied(id));
+            return Some(self.refused(args, self.denied(id), TOOL_NOT_ALLOWED));
         }
-        let tool_name = args
-            .get(MCP_REGISTRY_TOOL_KEY)
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .unwrap_or_default();
         if !tool_name.is_empty() && self.blocked(id, tool_name).await {
-            return Some(ToolResult::error(policy::blocked_refusal(id, tool_name)));
+            return Some(self.refused(
+                args,
+                ToolResult::error(policy::blocked_refusal(id, tool_name)),
+                TOOL_NOT_ALLOWED,
+            ));
         }
         None
+    }
+
+    /// `refusal`, carrying the call outcome when this is the call tool.
+    fn refused(&self, args: &Value, refusal: ToolResult, code: &str) -> ToolResult {
+        if self.inner.name() != REGISTRY_CALL_TOOL {
+            return refusal;
+        }
+        let (server, tool) = addressed(args);
+        registry_outcome::attach_refusal(refusal, server.unwrap_or_default(), tool, code)
+    }
+
+    /// The inner tool's result, carrying the call outcome when this is the
+    /// call tool.
+    fn answered(
+        &self,
+        args: &Value,
+        result: anyhow::Result<ToolResult>,
+    ) -> anyhow::Result<ToolResult> {
+        if self.inner.name() != REGISTRY_CALL_TOOL {
+            return result;
+        }
+        let (server, tool) = addressed(args);
+        result
+            .map(|result| registry_outcome::attach_answer(result, server.unwrap_or_default(), tool))
     }
 
     /// Whether the install's stored policy refuses this tool outright.
@@ -165,7 +189,8 @@ impl Tool for OcMcpRegistryScopedTool {
         if let Some(refusal) = self.authorize(&args).await {
             return Ok(refusal);
         }
-        self.inner.execute(args).await
+        let result = self.inner.execute(args.clone()).await;
+        self.answered(&args, result)
     }
 
     // The trait chains the three entry points by default, so each gates
@@ -178,7 +203,8 @@ impl Tool for OcMcpRegistryScopedTool {
         if let Some(refusal) = self.authorize(&args).await {
             return Ok(refusal);
         }
-        self.inner.execute_with_options(args, options).await
+        let result = self.inner.execute_with_options(args.clone(), options).await;
+        self.answered(&args, result)
     }
 
     async fn execute_with_context(
@@ -190,9 +216,11 @@ impl Tool for OcMcpRegistryScopedTool {
         if let Some(refusal) = self.authorize(&args).await {
             return Ok(refusal);
         }
-        self.inner
-            .execute_with_context(args, options, context)
-            .await
+        let result = self
+            .inner
+            .execute_with_context(args.clone(), options, context)
+            .await;
+        self.answered(&args, result)
     }
 
     fn supports_markdown(&self) -> bool {
@@ -254,6 +282,21 @@ impl Tool for OcMcpRegistryScopedTool {
     fn display_detail(&self, args: &Value) -> Option<String> {
         self.inner.display_detail(args)
     }
+}
+
+/// The install and remote tool a call names, read with trim-only semantics.
+fn addressed(args: &Value) -> (Option<&str>, &str) {
+    let server = args
+        .get(MCP_REGISTRY_SERVER_KEY)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty());
+    let tool = args
+        .get(MCP_REGISTRY_TOOL_KEY)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    (server, tool)
 }
 
 #[cfg(test)]
