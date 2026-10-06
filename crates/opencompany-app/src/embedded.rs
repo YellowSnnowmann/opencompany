@@ -174,6 +174,28 @@ pub async fn start_with_analytics(
     first_run: FirstRun,
     analytics: AnalyticsSetup,
 ) -> opencompany::Result<EmbeddedHost> {
+    start_with_library(data_dir, first_run, analytics, None).await
+}
+
+/// Where the bundle's `resources` place the `companies/` skill library,
+/// relative to `tauri.conf.json`.
+pub const SKILL_LIBRARY_RESOURCE: &str = "../../companies";
+
+/// The packaged skill library under the application's resource directory.
+pub fn packaged_skill_library(resource_dir: &std::path::Path) -> PathBuf {
+    resource_dir.join(tauri::utils::resources::resource_relpath(
+        std::path::Path::new(SKILL_LIBRARY_RESOURCE),
+    ))
+}
+
+/// [`start_with_analytics`], serving the skill library packaged at
+/// `packaged_skill_library` unless `OPENCOMPANY_SKILL_LIBRARY` names another.
+pub async fn start_with_library(
+    data_dir: PathBuf,
+    first_run: FirstRun,
+    analytics: AnalyticsSetup,
+    packaged_skill_library: Option<PathBuf>,
+) -> opencompany::Result<EmbeddedHost> {
     // Resolve, lock, migrate, and prove the journal root is writable — the same
     // sequence `serve` runs, shared rather than copied so the two cannot drift.
     // The lock is what refuses a second instance over one data root, including
@@ -318,7 +340,8 @@ pub async fn start_with_analytics(
             opencompany::server::hub_identity::HttpHubIdentityExchange::new(api_url),
         ))
         .with_skill_library(opencompany::company::skill_library::for_host_from_env(
-            None, None,
+            None,
+            packaged_skill_library,
         ));
     // Read before `state` moves into `bind`. Minting here rather than on the
     // first `/spec` also means the console can be told who this host is without
@@ -410,3 +433,6 @@ mod tests;
 #[cfg(test)]
 #[path = "embedded_analytics_tests.rs"]
 mod tests_analytics;
+#[cfg(test)]
+#[path = "embedded_skill_library_tests.rs"]
+mod tests_skill_library;

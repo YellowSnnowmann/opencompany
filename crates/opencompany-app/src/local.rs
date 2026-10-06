@@ -155,6 +155,9 @@ pub struct LocalHosts {
     /// The shell-wide analytics setup every instance this roster starts reports
     /// under: one consent switch for all of them.
     analytics: AnalyticsSetup,
+    /// The skill library packaged beside the application, served by every
+    /// instance this roster starts.
+    skill_library: Option<PathBuf>,
 }
 
 impl LocalHosts {
@@ -172,10 +175,21 @@ impl LocalHosts {
     /// `analytics` says. `load` itself reports nothing, which is what the
     /// roster's own tests want.
     pub async fn load_with_analytics(data_dir: PathBuf, analytics: AnalyticsSetup) -> Self {
+        Self::load_with_library(data_dir, analytics, None).await
+    }
+
+    /// [`Self::load_with_analytics`], with every instance serving the skill
+    /// library packaged at `skill_library`.
+    pub async fn load_with_library(
+        data_dir: PathBuf,
+        analytics: AnalyticsSetup,
+        skill_library: Option<PathBuf>,
+    ) -> Self {
         let roster = read_roster(&data_dir);
         let mut hosts = Self {
             data_dir,
             analytics,
+            skill_library,
             instances: roster
                 .instances
                 .into_iter()
@@ -448,7 +462,14 @@ impl LocalHosts {
         // through `desktop::seed_company`. Still enterable with no terminal, no
         // mail server and no credential — it asks first, which is the point.
         let first_run = FirstRun::RunSetupWizard;
-        match embedded::start_with_analytics(root, first_run, self.analytics.clone()).await {
+        match embedded::start_with_library(
+            root,
+            first_run,
+            self.analytics.clone(),
+            self.skill_library.clone(),
+        )
+        .await
+        {
             Ok(host) => {
                 tracing::info!(
                     id = %self.instances[index].entry.id,
