@@ -255,7 +255,7 @@ async fn mcp_failures_surface_as_error_steps_and_event() {
 
     let dir = tempfile::tempdir().unwrap();
     let events: Arc<dyn EventLog> = Arc::new(FsEventLog::new(dir.path()));
-    let failures = crate::mcp::probe::McpFailureQueue::default();
+    let failures = crate::mcp::observe::McpCallObserver::default();
     let deps = HarnessDeps {
         hive_store: None,
         emergency_gate: None,
@@ -314,7 +314,7 @@ async fn mcp_failures_surface_as_error_steps_and_event() {
     let brain = HarnessBrain::new(Arc::new(HarnessPool::new()), deps, record());
 
     // A failure recorded during the turn (its message already scrubbed).
-    failures.push(McpFailure {
+    failures.record(McpFailure {
         server: "browserbase".into(),
         tool: "browse".into(),
         status: "tool_call_rejected".into(),
@@ -357,7 +357,7 @@ async fn mcp_failures_surface_as_error_steps_and_event() {
 /// #185 review follow-up: one bad journal write must not swallow the rest of
 /// the batch.
 ///
-/// `McpFailureQueue::drain` is a `mem::take` — by the time the loop runs the
+/// `McpCallObserver::drain` is a `mem::take` — by the time the loop runs the
 /// queue is empty and the batch exists only in that iterator. Propagating
 /// the first append error with `?` therefore did not merely skip one audit
 /// event, it discarded every failure behind it with nothing left to retry
@@ -410,7 +410,7 @@ async fn a_failed_journal_write_does_not_swallow_the_rest_of_the_drain() {
 
     let dir = tempfile::tempdir().unwrap();
     let log = Arc::new(FailFirstLog::default());
-    let failures = crate::mcp::probe::McpFailureQueue::default();
+    let failures = crate::mcp::observe::McpCallObserver::default();
     let deps = HarnessDeps {
         hive_store: None,
         emergency_gate: None,
@@ -469,7 +469,7 @@ async fn a_failed_journal_write_does_not_swallow_the_rest_of_the_drain() {
     let brain = HarnessBrain::new(Arc::new(HarnessPool::new()), deps, record());
 
     for server in ["first", "second", "third"] {
-        failures.push(McpFailure {
+        failures.record(McpFailure {
             server: server.into(),
             tool: "browse".into(),
             status: "tool_call_rejected".into(),

@@ -3154,7 +3154,7 @@ impl RuntimeBuilder {
                                 // `HarnessPool::ensure` can re-resolve the effective
                                 // MCP set each turn (MCP-freshness) rather than the
                                 // snapshot frozen here at boot.
-                                mcp_failures: crate::mcp::probe::McpFailureQueue::default(),
+                                mcp_failures: crate::mcp::observe::McpCallObserver::default(),
                                 pending_publishes:
                                     crate::harness::publish::PendingPublishQueue::default(),
                                 // Issue #339: the workflow half of a card's

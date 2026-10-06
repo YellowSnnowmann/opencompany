@@ -33,7 +33,7 @@ use crate::harness::policy::ApprovalRequestQueue;
 use crate::harness::provider::{HostedProvider, HostedProviderConfig};
 use crate::harness::publish::PUBLISH_ARTIFACT_TOOL;
 use crate::harness::{HarnessBrain, HarnessDeps, HarnessPool};
-use crate::mcp::probe::McpFailureQueue;
+use crate::mcp::observe::McpCallObserver;
 use crate::ports::artifacts::{ArtifactRecord, ArtifactStore};
 use crate::ports::brain::CycleHost;
 use crate::ports::tasks::{COLUMN_IN_PROGRESS, TaskRecord, TaskStore, TaskTitle};
@@ -361,7 +361,7 @@ pub(crate) fn brain_with(
         events: None,
         delegations: DelegationQueue::default(),
         workflow_runner: WorkflowRunnerHandle::default(),
-        mcp_failures: McpFailureQueue::default(),
+        mcp_failures: McpCallObserver::default(),
         pending_publishes: Default::default(),
         workflow_refs: Default::default(),
         run_outputs: Default::default(),

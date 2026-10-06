@@ -265,7 +265,7 @@ use crate::harness::cost::{TurnUsage, record_turn_cost};
 use crate::harness::orchestrator::DelegationQueue;
 use crate::harness::policy::{ApprovalPolicy, ApprovalRequestQueue};
 use crate::hive::mcp_server::McpHost;
-use crate::mcp::probe::McpFailureQueue;
+use crate::mcp::observe::{AgentMcpObserver, McpCallObserver};
 use crate::ports::skills_state::{SkillState, SkillStateStore};
 use crate::ports::types::{
     Actor, ActorKind, AgentOverride, BudgetOverride, CompanyId, CompanyRecord, EventSeq,
@@ -432,10 +432,12 @@ pub struct HarnessDeps {
     /// Default (and any build with no runner) leaves it empty and the tool
     /// reports workflow execution is not wired.
     pub workflow_runner: crate::harness::orchestrator::WorkflowRunnerHandle,
-    /// The shared MCP failure queue the [`HarnessBrain`] drains after a turn. Same
-    /// cheap-shared-handle pattern as [`Self::delegations`]; every string it
-    /// carries is scrubbed at the source. Default is an empty queue.
-    pub mcp_failures: McpFailureQueue,
+    /// The company's MCP call observer: every agent built from these deps
+    /// records the MCP calls that failed in its turns here, and the
+    /// [`HarnessBrain`] drains them after a turn. Same cheap-shared-handle
+    /// pattern as [`Self::delegations`]; every string it carries is scrubbed
+    /// at the source. Default is an empty observer.
+    pub mcp_failures: McpCallObserver,
     /// The shared publish queue the `publish_artifact` tool stages onto and the
     /// [`HarnessBrain`] drains at the end of a dispatch (issue #244). Same
     /// cheap-shared-handle pattern as [`Self::mcp_failures`], and for the same
@@ -759,6 +761,9 @@ pub struct CompanyAgent {
     /// telemetry cells. Held here so `meter_turn_costs` reads the SAME
     /// instance the turn ran through.
     chat_model: Arc<dyn HarnessModel>,
+    /// Reads this agent's completed MCP calls after each turn: meters the
+    /// answered ones and records the failed ones on the company's observer.
+    mcp_observer: AgentMcpObserver,
 }
 
 impl std::fmt::Debug for CompanyAgent {
@@ -1374,6 +1379,7 @@ impl CompanyAgent {
         let build::AgentBlueprint {
             workspace,
             chat_model,
+            mcp_observer,
             ..
         } = blueprint;
         // No `.tools(..)`: the belt is the agent's own now. The entry keeps
@@ -1407,6 +1413,7 @@ impl CompanyAgent {
             mcp,
             workspace,
             chat_model,
+            mcp_observer,
         })
     }
 
@@ -1658,6 +1665,7 @@ impl CompanyAgent {
             envelope.run(surface, None, Box::pin(turn_body)).await;
 
         let events = pump.finish().await;
+        self.mcp_observer.observe(&events).await;
         turn_envelope::price_usages(&self.agent_id, &mut usages, &events);
         let findings = turn_envelope::turn_findings(
             &self.agent_id,
@@ -5978,7 +5986,7 @@ pub(crate) fn workflow_wiring_deps(
         events: None,
         delegations: orchestrator::DelegationQueue::default(),
         workflow_runner: orchestrator::WorkflowRunnerHandle::default(),
-        mcp_failures: crate::mcp::probe::McpFailureQueue::default(),
+        mcp_failures: crate::mcp::observe::McpCallObserver::default(),
         pending_publishes: publish::PendingPublishQueue::default(),
         workflow_refs: workflow_refs::WorkflowRefQueue::default(),
         run_outputs: orchestrator::RunOutputCache::default(),

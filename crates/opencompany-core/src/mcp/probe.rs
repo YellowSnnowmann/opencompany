@@ -8,8 +8,6 @@
 //!
 //! Compiled only under `feature = "openhuman"`.
 
-use std::sync::{Arc, Mutex};
-
 use crate::company::mcp::{McpHealth, McpServerDecl, McpStatus};
 use crate::mcp::agent::registry_from_decls;
 use crate::mcp::decl::server_info as mcp_server_info;
@@ -126,8 +124,9 @@ impl ProbeClass {
     }
 }
 
-/// One MCP tool-call failure observed during an agent turn, queued on the
-/// [`McpFailureQueue`] and drained by the [`HarnessBrain`](crate::harness::HarnessBrain) after the turn. Every
+/// One MCP tool-call failure observed during an agent turn, recorded by the
+/// [`McpCallObserver`](crate::mcp::observe::McpCallObserver) and drained by the
+/// [`HarnessBrain`](crate::harness::HarnessBrain) after the turn. Every
 /// string field is already scrubbed at construction — this is safe to persist,
 /// return, or show an operator.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -142,41 +141,6 @@ pub struct McpFailure {
     pub hint: Option<String>,
     /// A short, scrubbed, operator-facing message.
     pub scrubbed_message: String,
-}
-
-/// A shared, in-memory queue of MCP tool-call failures — the exact
-/// [`DelegationQueue`](crate::harness::orchestrator::DelegationQueue) pattern.
-/// Cheap to [`Clone`] (a shared handle); the tool built into the agent and the
-/// brain that drains it see the same queue because
-/// [`HarnessDeps`](crate::harness::HarnessDeps) clones share this handle.
-#[derive(Clone, Default)]
-pub struct McpFailureQueue {
-    inner: Arc<Mutex<Vec<McpFailure>>>,
-}
-
-impl McpFailureQueue {
-    /// Records a failure.
-    pub fn push(&self, failure: McpFailure) {
-        self.inner.lock().expect("mcp failure queue").push(failure);
-    }
-
-    /// Empties the queue (called before an orchestrator turn so a prior turn's
-    /// failures never leak into this one — mirrors `DelegationQueue::clear`).
-    pub fn clear(&self) {
-        self.inner.lock().expect("mcp failure queue").clear();
-    }
-
-    /// Drains every queued failure (FIFO), emptying the queue.
-    pub fn drain(&self) -> Vec<McpFailure> {
-        let mut guard = self.inner.lock().expect("mcp failure queue");
-        std::mem::take(&mut *guard)
-    }
-
-    /// The number of queued failures (test/observability).
-    #[cfg(test)]
-    pub fn queued(&self) -> usize {
-        self.inner.lock().expect("mcp failure queue").len()
-    }
 }
 
 /// Classify a raw MCP transport error into a [`ProbeClass`].

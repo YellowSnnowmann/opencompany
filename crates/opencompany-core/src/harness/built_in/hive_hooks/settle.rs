@@ -289,6 +289,7 @@ impl SettleTurn<'_> {
             Some(pump) => pump.finish().await,
             None => Vec::new(),
         };
+        agent.mcp_observer.observe(&events).await;
         let mut usages = vec![agent.tapped_usage()];
         price_usages(&manifest, &mut usages, &events);
         if let Err(error) = super::super::meter_turn_costs(
@@ -538,10 +539,10 @@ impl SettleTurn<'_> {
         (result, disposition)
     }
 
-    /// Drains the MCP failure queue onto the turn's step timeline as error
-    /// steps, and journals each as a scrubbed `McpCallFailed`. The queue is
-    /// shared, so a failure another turn raised in the same window may land
-    /// here; it is attributed to a turn either way rather than lost.
+    /// Drains the company's MCP call failures onto the turn's step timeline as
+    /// error steps, and journals each as a scrubbed `McpCallFailed`. The
+    /// observer is shared, so a failure another turn raised in the same window
+    /// may land here; it is attributed to a turn either way rather than lost.
     async fn surface_mcp_failures(&self, steps: &mut Vec<TurnStep>) {
         for failure in self.seat.deps.mcp_failures.drain() {
             steps.push(TurnStep {

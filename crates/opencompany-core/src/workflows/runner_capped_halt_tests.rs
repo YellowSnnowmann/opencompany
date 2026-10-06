@@ -464,7 +464,7 @@ pub(super) fn deps(dir: &std::path::Path) -> HarnessDeps {
         events: None,
         delegations: crate::harness::orchestrator::DelegationQueue::default(),
         workflow_runner: crate::harness::orchestrator::WorkflowRunnerHandle::default(),
-        mcp_failures: crate::mcp::probe::McpFailureQueue::default(),
+        mcp_failures: crate::mcp::observe::McpCallObserver::default(),
         pending_publishes: crate::harness::publish::PendingPublishQueue::default(),
         workflow_refs: crate::harness::workflow_refs::WorkflowRefQueue::default(),
         run_outputs: crate::harness::orchestrator::RunOutputCache::default(),

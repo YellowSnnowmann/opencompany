@@ -278,7 +278,7 @@ impl ApprovalPush {
 
 /// A shared, in-memory queue of approval-gated tool calls — the exact
 /// [`DelegationQueue`](crate::harness::orchestrator::DelegationQueue) /
-/// [`McpFailureQueue`](crate::mcp::probe::McpFailureQueue) pattern.
+/// [`McpCallObserver`](crate::mcp::observe::McpCallObserver) pattern.
 /// Cheap to [`Clone`] (a shared handle); the [`ApprovalPolicy`] installed on
 /// every roster agent and the [`HarnessBrain`](crate::harness::HarnessBrain)
 /// that drains it see the same queue because

@@ -55,7 +55,7 @@ async fn roster_builds_with_skill_surface_wired() {
         events: None,
         delegations: DelegationQueue::default(),
         workflow_runner: crate::harness::orchestrator::WorkflowRunnerHandle::default(),
-        mcp_failures: McpFailureQueue::default(),
+        mcp_failures: McpCallObserver::default(),
         pending_publishes: crate::harness::publish::PendingPublishQueue::default(),
         workflow_refs: crate::harness::workflow_refs::WorkflowRefQueue::default(),
         run_outputs: crate::harness::orchestrator::RunOutputCache::default(),

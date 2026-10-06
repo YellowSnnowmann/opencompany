@@ -1212,6 +1212,12 @@ pub fn build_agent_with_model(
         policy,
         definition_name,
         memory: AgentMemory::teammate(company, &manifest_agent.id),
+        mcp_observer: deps.mcp_failures.for_agent(
+            company.clone(),
+            manifest_agent.id.clone(),
+            deps.meter.clone(),
+            deps.mcp_servers.clone(),
+        ),
     })
 }
 
@@ -1271,6 +1277,9 @@ pub struct AgentBlueprint {
     pub definition_name: String,
     /// Whose memory the agent reads and writes (see [`AgentMemory`]).
     pub memory: AgentMemory,
+    /// Reads the agent's completed MCP calls after each turn, against the
+    /// company's declared servers and usage meter.
+    pub mcp_observer: crate::mcp::observe::AgentMcpObserver,
 }
 
 /// Whose OpenHuman memory an agent reads and writes.
