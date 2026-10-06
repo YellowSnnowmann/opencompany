@@ -311,10 +311,10 @@ const DM_DIRECTIVE = "__MOCK_DM__";
  * The turn is opened by the LAST user message that is not a tool output; if
  * that message carries no hive context this is not a coordinator turn (a
  * triage pass, a title). Everything after it is this turn's own tool loop:
- * the calls it made (`calls`, by name) and the results it got (`outputs`).
+ * the calls it made (`calls`, with ids) and the results it got (`outputs`).
  *
  * @param {any[]} messages
- * @returns {{agentId: string, company: string, agent: string, episode: any, request: any, calls: string[], outputs: any[]} | null}
+ * @returns {{agentId: string, company: string, agent: string, episode: any, request: any, calls: {id: string | undefined, name: string}[], outputs: any[]} | null}
  */
 function findCoordinatorTurn(messages) {
   let opened = -1;
@@ -344,7 +344,7 @@ function findCoordinatorTurn(messages) {
     if (message?.role === "assistant" && Array.isArray(message.tool_calls)) {
       for (const call of message.tool_calls) {
         const name = call?.function?.name ?? call?.name;
-        if (typeof name === "string") calls.push(name);
+        if (typeof name === "string") calls.push({ id: call?.id, name });
       }
     }
   }
@@ -440,10 +440,14 @@ function coordinatorCompletion(model, turn) {
     tool: "hivemind_complete",
     args: { episode_id: episodeId, body: `${MARKER} ${turn.agent} in episode ${episodeId}: done, nothing left open.` },
   });
-  // Explicit scripted tool calls may run inside the coordinator's agent turn
-  // before the episode is completed. They are not coordinator-control calls,
-  // so they do not advance the send/complete sequence.
-  const step = turn.calls.filter((name) => name.startsWith("hivemind_")).length;
+  // Only calls this arm emitted advance the protocol. Scripted operator calls
+  // may use hivemind_* tools too, but their ids do not carry this episode's
+  // coordinator prefix and therefore cannot skip a send or completion step.
+  const protocolPrefix = `mock-hive-${episodeId}-`;
+  const step = turn.calls.filter(
+    (call) => call.id?.startsWith(protocolPrefix) &&
+      (call.name === "hivemind_send_agent" || call.name === "hivemind_complete"),
+  ).length;
   if (step >= plan.length) {
     return completion(model, { role: "assistant", content: `${MARKER} ${turn.agent}: episode handled.` }, "stop");
   }
@@ -1298,27 +1302,7 @@ function chatCompletion(body) {
       servedPlans.set(plan.id, served + 1);
       process.stderr.write(`[mock brain] plan step ${served}: text reply\n`);
       if (coordinator && coordinator.episode) {
-        return completion(
-          model,
-          {
-            role: "assistant",
-            content: null,
-            tool_calls: [
-              {
-                id: `mock-hive-${coordinator.episode.episode_id}-complete`,
-                type: "function",
-                function: {
-                  name: "hivemind_complete",
-                  arguments: JSON.stringify({
-                    episode_id: coordinator.episode.episode_id,
-                    body: `${MARKER} scripted episode complete.`,
-                  }),
-                },
-              },
-            ],
-          },
-          "tool_calls",
-        );
+        return coordinatorCompletion(model, coordinator);
       }
     }
   }

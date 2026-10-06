@@ -444,7 +444,7 @@ test("a dismissed card's chip goes away and does not come back on reload", async
   await expect
     .poll(async () => {
       const response = await request.get("/api/v1/company/tasks");
-      if (!response.ok()) return true;
+      expect(response.ok(), `reading tasks failed: ${response.status()} ${await response.text()}`).toBeTruthy();
       const tasks = (await response.json()) as Task[];
       return !tasks.some((task) => task.id === taskId);
     })

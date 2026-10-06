@@ -4,6 +4,31 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { LIVE_BRAIN, LIVE_BRAIN_REASON, MCP_SERVER } from "./capabilities";
 
+let registeredServer: string | undefined;
+
+test.afterEach(async ({ request }) => {
+  // External hosts outlive the run; managed E2E keeps the registration for its
+  // isolated host lifetime because durable agent snapshots can retain tools.
+  if (!registeredServer || !process.env.PW_BASE_URL) return;
+  const server = registeredServer;
+  let failure: string | undefined;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const removed = await request.delete(
+        `/api/v1/company/mcp/servers/${encodeURIComponent(server)}`,
+      );
+      if (removed.ok()) {
+        registeredServer = undefined;
+        return;
+      }
+      failure = `HTTP ${removed.status()}: ${await removed.text()}`;
+    } catch (error) {
+      failure = `request failed: ${String(error)}`;
+    }
+  }
+  expect(failure, `removing registered MCP server ${server} failed`).toBeUndefined();
+});
+
 /**
  * The half of the MCP bridge a console cannot reach: an **agent** calling a
  * tool on a real server, over the real transport (issues #50, #467).
@@ -89,6 +114,7 @@ test("an agent calls a tool on a registered MCP server and shows the result", as
     added.ok(),
     `registering ${server} failed: ${added.status()} ${await added.text()}`,
   ).toBeTruthy();
+  registeredServer = server;
 
   // Keep the registration for the life of this E2E host. OpenHuman retains
   // tool declarations in its durable agent session; deleting the server here

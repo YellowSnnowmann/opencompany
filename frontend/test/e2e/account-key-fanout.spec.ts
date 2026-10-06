@@ -136,14 +136,15 @@ async function stubBilling(page: Page, body: Record<string, unknown>): Promise<v
 /** Open the Account page with the first-run tour out of the way. */
 async function openAccount(page: Page): Promise<void> {
   await stubBilling(page, { configured: false });
+  // Keep the onboarding tour from racing the direct settings deep link. This
+  // suite measures the account-key dialog, not the first-run overlay.
+  await page.addInitScript(() => {
+    const real = Storage.prototype.getItem;
+    Storage.prototype.getItem = function getItem(key: string) {
+      return key.startsWith("oc-tour:") ? '{"skipped":true}' : real.call(this, key);
+    };
+  });
   await page.goto("/#/connections/api-key");
-  const skip = page.getByRole("button", { name: "Skip for now" });
-  await skip
-    .waitFor({ state: "visible", timeout: 10_000 })
-    .then(() => skip.click())
-    .catch(() => {
-      /* already dismissed in this context */
-    });
   await expect(
     page.getByTestId("account-rows").or(page.getByTestId("account-empty")),
   ).toBeVisible({ timeout: 30_000 });
