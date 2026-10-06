@@ -17,7 +17,9 @@
 
 use super::skill_file::{SkillDoc, parse_skill_md};
 use crate::error::OpenCompanyError;
-use tinyskills::split_frontmatter;
+use tinyskills::{
+    PunctuationRule, SlugError, SlugRules, check_frontmatter_size, validate_description_chars,
+};
 
 /// The longest a skill slug may be, in characters.
 ///
@@ -87,6 +89,20 @@ pub struct ValidSkill {
 /// renamed without updating it fails rather than reopening the hole.
 pub const RESERVED_SLUGS: &[&str] = &["draft", "upload", "registry"];
 
+/// The slug rules for deriving and accepting skill slugs: a safe
+/// `[a-z0-9][a-z0-9-]*` name within [`MAX_SLUG_CHARS`], off
+/// [`RESERVED_SLUGS`]. Deriving folds every run of other characters to one
+/// `-`, cuts a long name rather than refusing it, and falls back to `skill`.
+pub const SLUG_RULES: SlugRules<'static> = SlugRules::new()
+    .max_chars(MAX_SLUG_CHARS)
+    .reserved(RESERVED_SLUGS)
+    .truncate(true)
+    .punctuation(PunctuationRule::Separator)
+    .fallback("skill");
+
+/// [`SLUG_RULES`]' shape rule alone, with no length cap and nothing reserved.
+pub const SLUG_SHAPE_RULES: SlugRules<'static> = SlugRules::new().max_chars(usize::MAX);
+
 /// The half of [`validate_slug`] that is about safety rather than about size.
 ///
 /// A slug is a path segment, and this is what keeps it one. The length cap is
@@ -94,36 +110,32 @@ pub const RESERVED_SLUGS: &[&str] = &["draft", "upload", "registry"];
 /// already exists asks only this: a row stored before the cap was introduced is
 /// still a row its owner has to be able to reach.
 pub fn validate_slug_shape(slug: &str) -> Result<(), String> {
-    if !super::skill_effective::valid_slug(slug) {
-        return Err(format!(
-            "`{slug}` is not a valid skill slug. Skills live under `skills/<slug>/`, so a slug \
-             is `[a-z0-9][a-z0-9-]*`."
-        ));
-    }
-    Ok(())
+    tinyskills::validate_slug(slug, &SLUG_SHAPE_RULES).map_err(|error| slug_problem(slug, &error))
 }
 
-/// Whether `slug` is one the product will accept: a safe directory name
-/// (`^[a-z0-9][a-z0-9-]*$`) within [`MAX_SLUG_CHARS`].
+/// Whether `slug` is one the product will accept under [`SLUG_RULES`]: a safe
+/// directory name within [`MAX_SLUG_CHARS`] and not reserved.
 ///
 /// Returns the operator-facing reason on refusal, so each caller can wrap it in
 /// its own error type without restating the rule.
 pub fn validate_slug(slug: &str) -> Result<(), String> {
-    validate_slug_shape(slug)?;
-    let length = slug.chars().count();
-    if length > MAX_SLUG_CHARS {
-        return Err(format!(
-            "that slug is {length} characters — a skill slug has to be {MAX_SLUG_CHARS} \
-             characters or fewer."
-        ));
-    }
-    if RESERVED_SLUGS.contains(&slug) {
-        return Err(format!(
+    tinyskills::validate_slug(slug, &SLUG_RULES).map_err(|error| slug_problem(slug, &error))
+}
+
+fn slug_problem(slug: &str, error: &SlugError) -> String {
+    match error {
+        SlugError::TooLong { length, max } => format!(
+            "that slug is {length} characters — a skill slug has to be {max} characters or fewer."
+        ),
+        SlugError::Reserved { .. } => format!(
             "`{slug}` is a reserved skill slug — the skill routes already use that path, so a \
              skill stored under it could never be switched off again."
-        ));
+        ),
+        _ => format!(
+            "`{slug}` is not a valid skill slug. Skills live under `skills/<slug>/`, so a slug \
+             is `[a-z0-9][a-z0-9-]*`."
+        ),
     }
-    Ok(())
 }
 
 /// Validates one `SKILL.md` source for the given slug.
@@ -139,13 +151,11 @@ pub fn validate_skill_md(slug: &str, src: &str) -> Result<ValidSkill, Vec<String
         problems.push(problem);
     }
 
-    if let Some((frontmatter, _)) = split_frontmatter(src)
-        && frontmatter.len() > MAX_FRONTMATTER_BYTES
-    {
+    if let Err(too_large) = check_frontmatter_size(src, MAX_FRONTMATTER_BYTES) {
         problems.push(format!(
             "that skill's frontmatter block is {} bytes — a skill's frontmatter has to be under \
              {MAX_FRONTMATTER_BYTES} bytes.",
-            frontmatter.len()
+            too_large.bytes
         ));
     }
 
@@ -163,11 +173,11 @@ pub fn validate_skill_md(slug: &str, src: &str) -> Result<ValidSkill, Vec<String
         }
     };
 
-    let described = doc.description.chars().count();
-    if described > MAX_DESCRIPTION_CHARS {
+    if let Err(too_long) = validate_description_chars(&doc.description, MAX_DESCRIPTION_CHARS) {
         problems.push(format!(
-            "that skill's description is {described} characters — a description has to be \
-             {MAX_DESCRIPTION_CHARS} characters or fewer."
+            "that skill's description is {} characters — a description has to be \
+             {MAX_DESCRIPTION_CHARS} characters or fewer.",
+            too_long.chars
         ));
     }
 
@@ -187,33 +197,15 @@ pub fn validate_skill_md(slug: &str, src: &str) -> Result<ValidSkill, Vec<String
 }
 
 /// Turns a display name into a slug the slug-bearing routes accept: a
-/// filesystem-and-URL-safe name within [`MAX_SLUG_CHARS`].
+/// filesystem-and-URL-safe name within [`MAX_SLUG_CHARS`], derived under
+/// [`SLUG_RULES`].
 ///
 /// Authoring and upload both derive a store key and a directory name from free
 /// text, so whatever this returns has to pass [`validate_slug`]. Truncating
 /// keeps a long name authorable; refusing it would leave the operator renaming
 /// a skill to satisfy a limit they cannot see.
 pub fn slugify(name: &str) -> String {
-    let mut slug = String::with_capacity(name.len());
-    let mut prev_dash = false;
-    for ch in name.chars() {
-        if ch.is_ascii_alphanumeric() {
-            slug.push(ch.to_ascii_lowercase());
-            prev_dash = false;
-        } else if !prev_dash {
-            slug.push('-');
-            prev_dash = true;
-        }
-    }
-    let capped: String = slug.chars().take(MAX_SLUG_CHARS).collect();
-    let trimmed = capped.trim_matches('-').to_string();
-    if trimmed.is_empty() {
-        "skill".to_string()
-    } else if RESERVED_SLUGS.contains(&trimmed.as_str()) {
-        format!("{trimmed}-2")
-    } else {
-        trimmed
-    }
+    tinyskills::slugify_with(name, &SLUG_RULES).unwrap_or_else(|_| "skill".to_string())
 }
 
 #[cfg(test)]

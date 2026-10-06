@@ -219,3 +219,105 @@ fn slugify_steps_off_every_reserved_slug() {
         );
     }
 }
+
+fn reference_slugify(name: &str) -> String {
+    let mut slug = String::with_capacity(name.len());
+    let mut prev_dash = false;
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash {
+            slug.push('-');
+            prev_dash = true;
+        }
+    }
+    let capped: String = slug.chars().take(MAX_SLUG_CHARS).collect();
+    let trimmed = capped.trim_matches('-').to_string();
+    if trimmed.is_empty() {
+        "skill".to_string()
+    } else if RESERVED_SLUGS.contains(&trimmed.as_str()) {
+        format!("{trimmed}-2")
+    } else {
+        trimmed
+    }
+}
+
+#[test]
+fn slugify_matches_the_reference_derivation() {
+    let long = format!("{}-tail", "a".repeat(MAX_SLUG_CHARS - 1));
+    let names = [
+        "Web Research",
+        "  My  Skill!!  ",
+        "rock'n'roll",
+        "Café Menu",
+        "!!!",
+        "",
+        "Draft",
+        "upload",
+        "REGISTRY",
+        "draft-2",
+        "a_b-c d",
+        "--lead and trail--",
+        "日本語",
+        long.as_str(),
+        &"x".repeat(200),
+        &format!("{}!b", "a".repeat(MAX_SLUG_CHARS - 1)),
+    ];
+    for name in names {
+        let slug = slugify(name);
+        assert_eq!(slug, reference_slugify(name), "slugify({name:?})");
+        assert!(validate_slug(&slug).is_ok(), "slugify({name:?}) = {slug:?}");
+    }
+}
+
+#[test]
+fn slug_refusals_keep_their_operator_text() {
+    assert_eq!(
+        validate_slug("Bad").unwrap_err(),
+        "`Bad` is not a valid skill slug. Skills live under `skills/<slug>/`, so a slug is \
+         `[a-z0-9][a-z0-9-]*`."
+    );
+    assert_eq!(
+        validate_slug(&"a".repeat(65)).unwrap_err(),
+        "that slug is 65 characters — a skill slug has to be 64 characters or fewer."
+    );
+    assert_eq!(
+        validate_slug("upload").unwrap_err(),
+        "`upload` is a reserved skill slug — the skill routes already use that path, so a skill \
+         stored under it could never be switched off again."
+    );
+    assert!(validate_slug_shape(&"a".repeat(65)).is_ok());
+    assert!(validate_slug_shape("upload").is_ok());
+    assert_eq!(
+        validate_slug_shape("").unwrap_err(),
+        "`` is not a valid skill slug. Skills live under `skills/<slug>/`, so a slug is \
+         `[a-z0-9][a-z0-9-]*`."
+    );
+}
+
+#[test]
+fn size_refusals_keep_their_operator_text() {
+    let padding = "x".repeat(MAX_FRONTMATTER_BYTES);
+    let src = format!("---\nname: demo\ndescription: short\npadding: {padding}\n---\n# Body\n");
+    let problems = validate_skill_md("demo", &src).expect_err("oversized");
+    let bytes = "name: demo\ndescription: short\npadding: \n".len() + MAX_FRONTMATTER_BYTES;
+    assert_eq!(
+        problems,
+        [format!(
+            "that skill's frontmatter block is {bytes} bytes — a skill's frontmatter has to be \
+             under {MAX_FRONTMATTER_BYTES} bytes."
+        )]
+    );
+
+    let over = "é".repeat(MAX_DESCRIPTION_CHARS + 1);
+    let problems = validate_skill_md("demo", &skill_md("demo", &over)).expect_err("too long");
+    assert_eq!(
+        problems,
+        [format!(
+            "that skill's description is {} characters — a description has to be \
+             {MAX_DESCRIPTION_CHARS} characters or fewer.",
+            MAX_DESCRIPTION_CHARS + 1
+        )]
+    );
+}

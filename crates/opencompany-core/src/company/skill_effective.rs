@@ -92,12 +92,7 @@ impl EffectiveSkill {
 /// (`skills/<slug>/`), so a traversal (`..`) or a path separator would escape
 /// it via [`Path::join`]. Refused wherever a slug enters.
 pub fn valid_slug(slug: &str) -> bool {
-    let mut chars = slug.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit() => {}
-        _ => return false,
-    }
-    chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    tinyskills::validate_slug(slug, &crate::company::skill_validate::SLUG_SHAPE_RULES).is_ok()
 }
 
 /// The disabling [`SkillState`] deltas a company's `[globals].disable` implies.
