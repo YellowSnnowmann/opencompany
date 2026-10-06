@@ -29,18 +29,18 @@ import { isDesktopRuntime } from "@/api/transport";
 /**
  * Height of the reserved strip, in px, and the height of the drag band.
  *
- * Measured, not estimated (two prior guesses — 28, then 38 — both missed):
- * `osascript`/System Events against the live window gives the traffic
- * lights' actual centre as 11px below the window's top edge (window y=30,
- * light centreY=41, both screen coordinates) on this macOS build — whatever
- * `trafficLightPosition.y` in `tauri.conf.json` is actually doing, this is
- * where the lights land. 22 centres this row's icons (flex `items-center`,
- * so centre is always height/2) at that same 11px, which is the only thing
- * that has to agree with reality; `trafficLightPosition` itself is left
- * alone rather than tuned further against an effect not isolated by measuring
- * it on its own.
+ * Measured, not estimated. Two isolated `trafficLightPosition.y` values,
+ * each rebuilt and re-measured via `osascript`/System Events against the
+ * live window, give an exact linear relationship on this macOS build: the
+ * lights' top sits at `y - 10` px below the window's top edge (y=13 → top=3;
+ * y=24 → top=14 — both confirmed, not inferred from one point). At the
+ * current `trafficLightPosition.y: 18` (`tauri.conf.json`) that puts the
+ * lights' top at 8px — 8px of margin above them, the operator's ask after
+ * the icons-vs-lights alignment itself was already fixed — and their centre
+ * at 16px (8 + half of their 16px height). 32 centres this row's icons (flex
+ * `items-center`, so centre is always height/2) at that same 16px.
  */
-export const WINDOW_CHROME_HEIGHT = 22;
+export const WINDOW_CHROME_HEIGHT = 32;
 
 /**
  * How far into the window the traffic lights reach, in px.
