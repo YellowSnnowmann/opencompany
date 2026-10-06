@@ -4136,6 +4136,7 @@ dependencies = [
  "tinymemory-api",
  "tinymemory-integrations",
  "tinysearch-bus",
+ "tinyskills",
  "tinytools",
  "tinytools-agent",
  "tinytools-std",

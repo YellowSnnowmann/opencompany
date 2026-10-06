@@ -263,6 +263,12 @@ openhuman-tinyhumans = { path = "../../vendor/openhuman/crates/openhuman-tinyhum
 # its only dependencies, `serde` and `thiserror`, are already in this lockfile.
 tinyhivemind-core = { path = "../../vendor/tinyhivemind/crates/tinyhivemind-core" }
 
+# The skill document format: frontmatter parse and render, slug rules, digests,
+# bundle scan and materialize. Ungated because the skill routes and the store
+# run in every build. Same vendored path OpenHuman depends on, so Cargo
+# resolves one copy.
+tinyskills = { path = "../../vendor/openhuman/vendor/tinyskills/crates/tinyskills" }
+
 # The MCP client, extracted out of OpenHuman into its own crate. OpenHuman's
 # `oh::mcp::http_client` facade still re-exports the transport and the payload
 # types under their old spellings, but not `tinymcp::Error` — and the typed 401
