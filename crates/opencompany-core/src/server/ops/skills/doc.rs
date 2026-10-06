@@ -107,7 +107,11 @@ async fn read_doc(
         &company.runtime.globals_disable().await?,
     ));
     let registry = state.shared_skill_registry()?;
-    let effective = skill_effective::resolve(company.runtime.source_dir(), &registry, &deltas)?;
+    let effective = crate::company::skill_set::resolve_company(
+        company.runtime.source_dir(),
+        &registry,
+        &deltas,
+    )?;
     let found = effective
         .into_iter()
         .find(|skill| skill.slug == slug)

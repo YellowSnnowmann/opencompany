@@ -8,9 +8,11 @@
 //!
 //! The layers, bottom to top:
 //!
-//! 1. the global baseline ([`crate::globals::skills`]), installed in every
-//!    company — including a platform-provisioned tenant with no checkout;
-//! 2. the company's committed bundles (`companies/<name>/skills/*/SKILL.md`);
+//! 1. the baseline [`SkillLayers::baseline`] — for a company, the global
+//!    baseline every company gets, including a platform-provisioned tenant
+//!    with no checkout;
+//! 2. the bundle under [`SkillLayers::bundle_root`] — for a company, its
+//!    committed `companies/<name>/skills/*/SKILL.md`;
 //! 3. the operator's [`SkillState`] deltas — an enable/disable override, a
 //!    registry install's pinned snapshot, or a console-authored skill.
 //!
@@ -122,17 +124,30 @@ pub fn globals_skill_disables(disable: &[String]) -> Vec<SkillState> {
         .collect()
 }
 
-/// Resolves a company's effective skill set, ordered by slug.
+/// The content layers a skill set is folded from, beneath the operator deltas.
 ///
-/// `source_dir` is the company's source directory (`companies/<name>`), `None`
-/// for a platform-provisioned tenant. `registry` is the repo-level shared
-/// library, read only to heal a degenerate registry snapshot (see
-/// [`registry_heal`]). `deltas` are the store's rows plus whatever
-/// [`globals_skill_disables`] adds for the manifest.
+/// Every layer is passed in rather than looked up, so the fold reads nothing
+/// ambient and the same function serves any owner whose layers differ.
+#[derive(Clone, Copy, Debug)]
+pub struct SkillLayers<'a> {
+    /// The bottom layer, installed unless a delta disables it.
+    pub baseline: &'a [SkillDoc],
+    /// The directory holding the owner's committed `<slug>/SKILL.md` bundles,
+    /// `None` when the owner has none.
+    pub bundle_root: Option<&'a Path>,
+    /// The shared library, read only to heal a degenerate registry snapshot
+    /// (see [`registry_heal`]).
+    pub library: &'a [SkillDoc],
+}
+
+/// Resolves an effective skill set from its layers and deltas, ordered by slug.
+///
+/// `deltas` are the store's rows plus whatever [`globals_skill_disables`] adds
+/// for the manifest.
 ///
 /// Resolution rules:
-/// * the global baseline is the bottom layer, superseded by any same-slug
-///   company bundle or delta snapshot and dropped by a disabling delta;
+/// * the baseline is the bottom layer, superseded by any same-slug bundle or
+///   delta snapshot and dropped by a disabling delta;
 /// * a company bundle is enabled unless a delta disables it;
 /// * a delta sets the slug's `enabled` flag and its provenance, and a delta
 ///   carrying a `custom_doc` supersedes the document beneath it;
@@ -145,14 +160,10 @@ pub fn globals_skill_disables(disable: &[String]) -> Vec<SkillState> {
 /// whole directory, so every agent in that company loses its catalogue, and a
 /// reader that answered with the surviving subset would describe a set no agent
 /// has.
-pub fn resolve(
-    source_dir: Option<&Path>,
-    registry: &[SkillDoc],
-    deltas: &[SkillState],
-) -> Result<Vec<EffectiveSkill>> {
+pub fn resolve(layers: &SkillLayers<'_>, deltas: &[SkillState]) -> Result<Vec<EffectiveSkill>> {
     let mut entries: BTreeMap<String, EffectiveSkill> = BTreeMap::new();
 
-    for doc in crate::globals::skills() {
+    for doc in layers.baseline {
         entries.insert(
             doc.slug.clone(),
             EffectiveSkill {
@@ -169,9 +180,8 @@ pub fn resolve(
         );
     }
 
-    if let Some(dir) = source_dir {
-        let root = dir.join("skills");
-        for doc in load_dir_skills(&root)? {
+    if let Some(root) = layers.bundle_root {
+        for doc in load_dir_skills(root)? {
             let slug = doc.slug.clone();
             let bundle = root.join(&slug);
             entries.insert(
@@ -226,7 +236,7 @@ pub fn resolve(
         if delta.install.is_some() {
             entry.install = delta.install.clone();
         }
-        if let Some(resolved) = delta_content(delta, registry) {
+        if let Some(resolved) = delta_content(delta, layers.library) {
             if resolved.healed {
                 entry.install = None;
             }
@@ -265,13 +275,12 @@ pub fn resolve(
 /// typo in `company.toml` reads as a typo instead of as a scope that quietly
 /// confers nothing.
 pub fn resolve_for_agent(
-    source_dir: Option<&Path>,
-    registry: &[SkillDoc],
+    layers: &SkillLayers<'_>,
     deltas: &[SkillState],
     agent: &str,
     agent_skills: Option<&[String]>,
 ) -> Result<Vec<EffectiveSkill>> {
-    let effective = resolve(source_dir, registry, deltas)?;
+    let effective = resolve(layers, deltas)?;
     let enabled: Vec<String> = effective
         .iter()
         .filter(|skill| skill.enabled)
@@ -426,6 +435,9 @@ fn registry_heal<'a>(
     registry.iter().find(|doc| doc.slug == delta.slug)
 }
 
+#[cfg(test)]
+#[path = "skill_effective/skill_effective_layers_tests.rs"]
+mod layers_tests;
 #[cfg(test)]
 #[path = "skill_effective/skill_effective_tests.rs"]
 mod tests;

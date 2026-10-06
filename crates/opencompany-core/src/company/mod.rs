@@ -136,6 +136,9 @@ pub mod skill_scan;
 /// the per-agent allowlist, shared by both transports so a skill's detail panel
 /// and a teammate's page cannot disagree about the same scope.
 pub mod skill_scope;
+/// A company's skill set assembled from its named layers, so every reader
+/// folds the same ones.
+pub mod skill_set;
 /// Reading a skill an operator uploaded — a bare `SKILL.md`, or an archive
 /// carrying one — with the archive's shape refused before anything is
 /// decompressed.

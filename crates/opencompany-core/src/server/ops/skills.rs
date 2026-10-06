@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use crate::AppState;
 use crate::company::skill_effective::{self, EffectiveSkill};
 use crate::company::skill_scope::agents_for_skill;
+use crate::company::skill_set;
 use crate::company::skill_validate::{MAX_SLUG_CHARS, slugify, validate_slug, validate_slug_shape};
 use crate::company::{
     SkillDoc, SkillDrift, VersionChange, effective_drift, parse_skill_md, render_skill_md,
@@ -265,7 +266,7 @@ async fn list_skills(
         &company.runtime.globals_disable().await?,
     ));
     let registry = state.shared_skill_registry()?;
-    let effective = skill_effective::resolve(company.runtime.source_dir(), &registry, &deltas)?;
+    let effective = skill_set::resolve_company(company.runtime.source_dir(), &registry, &deltas)?;
     let roster = scope::roster_scopes(&company.runtime).await?;
     Ok(Json(
         effective
@@ -555,7 +556,7 @@ async fn taken_slugs(
     ));
     let registry = state.shared_skill_registry()?;
     Ok(
-        skill_effective::resolve(runtime.source_dir(), &registry, &deltas)?
+        skill_set::resolve_company(runtime.source_dir(), &registry, &deltas)?
             .into_iter()
             .map(|skill| skill.slug)
             .collect(),

@@ -36,7 +36,7 @@ use oh::skills::tools::{WorkflowDescribeTool, WorkflowListTool, WorkflowReadReso
 use tinytools::Tool;
 
 use crate::company::SkillDoc;
-use crate::company::skill_effective::{self, SkillBody};
+use crate::company::skill_effective::SkillBody;
 use crate::company::skill_scan::sanitize_catalogue_text;
 use crate::error::OpenCompanyError;
 use crate::ports::skills_state::SkillState;
@@ -99,8 +99,13 @@ impl EffectiveSkills {
         agent: &str,
         agent_skills: Option<&[String]>,
     ) -> crate::Result<Self> {
-        let effective =
-            skill_effective::resolve_for_agent(source_dir, registry, deltas, agent, agent_skills)?;
+        let effective = crate::company::skill_set::resolve_company_for_agent(
+            source_dir,
+            registry,
+            deltas,
+            agent,
+            agent_skills,
+        )?;
 
         let skills_out = workspace_dir.join("skills");
         if skills_out.exists() {

@@ -6,7 +6,8 @@
 //! one, and what a reader gets for an entry that was never pinned.
 
 use super::*;
-use crate::company::skill_effective::{EffectiveSkill, resolve};
+use crate::company::skill_effective::EffectiveSkill;
+use crate::company::skill_set::resolve_company;
 use crate::ports::skills_state::{SkillInstall, SkillSource, SkillState};
 
 fn library_doc(version: &str, body: &str) -> SkillDoc {
@@ -58,7 +59,7 @@ fn a_resolved_install_whose_library_moved_offers_the_update() {
     let stored = render_skill_md(&installed);
     let registry = vec![moved];
 
-    let set = resolve(None, &registry, &[delta(&stored, Some(pin(&installed)))]).unwrap();
+    let set = resolve_company(None, &registry, &[delta(&stored, Some(pin(&installed)))]).unwrap();
     let drifted = effective_drift(entry(&set, "web-research"), &registry)
         .expect("a pinned install answers the question");
 
@@ -82,7 +83,7 @@ fn a_resolved_install_edited_out_of_band_reads_as_modified() {
     let registry = vec![installed.clone()];
     let edited = render_skill_md(&installed).replace("Step one.", "Do something else.");
 
-    let set = resolve(None, &registry, &[delta(&edited, Some(pin(&installed)))]).unwrap();
+    let set = resolve_company(None, &registry, &[delta(&edited, Some(pin(&installed)))]).unwrap();
     let drifted = effective_drift(entry(&set, "web-research"), &registry)
         .expect("a pinned install answers the question");
 
@@ -97,7 +98,7 @@ fn a_resolved_install_edited_out_of_band_reads_as_modified() {
 /// "checked, and clean", which is a claim nothing here is entitled to make.
 #[test]
 fn an_unpinned_entry_answers_nothing_rather_than_clean() {
-    let set = resolve(None, &[], &[]).unwrap();
+    let set = resolve_company(None, &[], &[]).unwrap();
     let baseline = crate::globals::skills()
         .first()
         .expect("the baseline ships at least one skill");
@@ -121,7 +122,7 @@ fn healing_a_degenerate_snapshot_drops_the_pin_it_can_no_longer_check() {
     stub.body = stub.description.clone();
     let stored = render_skill_md(&stub);
 
-    let set = resolve(None, &registry, &[delta(&stored, Some(pin(&stub)))]).unwrap();
+    let set = resolve_company(None, &registry, &[delta(&stored, Some(pin(&stub)))]).unwrap();
 
     let entry = entry(&set, "web-research");
     assert_eq!(
@@ -148,7 +149,7 @@ fn a_synthesized_disable_does_not_erase_the_pin_beneath_it() {
         "skill:web-research".to_string(),
     ]));
 
-    let set = resolve(None, &registry, &deltas).unwrap();
+    let set = resolve_company(None, &registry, &deltas).unwrap();
 
     let entry = entry(&set, "web-research");
     assert!(!entry.enabled, "the disable still wins");

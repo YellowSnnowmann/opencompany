@@ -190,7 +190,7 @@ async fn rest_and_graphql_agree_about_one_install_standing() {
         runtime.skills().list(runtime.id()).await.unwrap()
     };
     let registry = state.shared_skill_registry().unwrap();
-    let effective = crate::company::skill_effective::resolve(None, &registry, &deltas).unwrap();
+    let effective = crate::company::skill_set::resolve_company(None, &registry, &deltas).unwrap();
     let entry = effective.iter().find(|e| e.slug == SLUG).unwrap();
     let drifted = crate::company::effective_drift(entry, &registry).expect("a pinned install");
 

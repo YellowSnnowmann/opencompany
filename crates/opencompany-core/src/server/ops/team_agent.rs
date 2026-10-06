@@ -821,13 +821,15 @@ pub(super) async fn company_enabled_skills(
         &company.runtime.globals_disable().await?,
     ));
     let registry = state.shared_skill_registry()?;
-    Ok(
-        crate::company::skill_effective::resolve(company.runtime.source_dir(), &registry, &deltas)?
-            .into_iter()
-            .filter(|skill| skill.enabled)
-            .map(|skill| skill.slug)
-            .collect(),
-    )
+    Ok(crate::company::skill_set::resolve_company(
+        company.runtime.source_dir(),
+        &registry,
+        &deltas,
+    )?
+    .into_iter()
+    .filter(|skill| skill.enabled)
+    .map(|skill| skill.slug)
+    .collect())
 }
 
 /// `PATCH {scope}/team/{agent_id}` — edit a teammate.

@@ -43,7 +43,7 @@ fn find<'a>(set: &'a [EffectiveSkill], slug: &str) -> &'a EffectiveSkill {
 /// platform-provisioned tenant boots in.
 #[test]
 fn the_global_baseline_is_the_bottom_layer() {
-    let set = resolve(None, &[], &[]).unwrap();
+    let set = crate::company::skill_set::resolve_company(None, &[], &[]).unwrap();
 
     let slugs = global_slugs();
     assert!(
@@ -65,7 +65,7 @@ fn the_set_is_ordered_by_slug() {
     seed_bundle(tmp.path(), "zebra", "Zebra");
     seed_bundle(tmp.path(), "alpha", "Alpha");
 
-    let set = resolve(Some(tmp.path()), &[], &[]).unwrap();
+    let set = crate::company::skill_set::resolve_company(Some(tmp.path()), &[], &[]).unwrap();
     let slugs: Vec<&str> = set.iter().map(|skill| skill.slug.as_str()).collect();
     let mut sorted = slugs.clone();
     sorted.sort_unstable();
@@ -80,7 +80,7 @@ fn a_company_bundle_supersedes_a_global_of_the_same_slug() {
     let slug = global_slugs()[0].clone();
     seed_bundle(tmp.path(), &slug, "Company Override");
 
-    let set = resolve(Some(tmp.path()), &[], &[]).unwrap();
+    let set = crate::company::skill_set::resolve_company(Some(tmp.path()), &[], &[]).unwrap();
     let skill = find(&set, &slug);
     assert_eq!(skill.doc().unwrap().name, "Company Override");
     assert_eq!(
@@ -94,7 +94,7 @@ fn a_company_bundle_supersedes_a_global_of_the_same_slug() {
 #[test]
 fn a_disabling_delta_reports_a_global_as_disabled_rather_than_hiding_it() {
     let slug = global_slugs()[0].clone();
-    let set = resolve(
+    let set = crate::company::skill_set::resolve_company(
         None,
         &[],
         &[delta(&slug, false, SkillSource::Company, None)],
@@ -117,7 +117,7 @@ fn a_manifest_opt_out_disables_a_global_and_beats_an_enable() {
     let mut deltas = vec![delta(&slug, true, SkillSource::Company, None)];
     deltas.extend(globals_skill_disables(&[format!("skill:{slug}")]));
 
-    let skill_set = resolve(None, &[], &deltas).unwrap();
+    let skill_set = crate::company::skill_set::resolve_company(None, &[], &deltas).unwrap();
     let skill = find(&skill_set, &slug);
     assert!(!skill.enabled, "the company's own declaration wins");
     assert_eq!(
@@ -147,7 +147,7 @@ fn a_custom_doc_supersedes_the_layer_beneath_it() {
     seed_bundle(tmp.path(), "onboard", "Onboard");
     let authored = "---\nname: Onboard v2\ndescription: The operator's own\n---\n# v2\n";
 
-    let set = resolve(
+    let set = crate::company::skill_set::resolve_company(
         Some(tmp.path()),
         &[],
         &[delta("onboard", true, SkillSource::Custom, Some(authored))],
@@ -166,7 +166,7 @@ fn a_custom_doc_supersedes_the_layer_beneath_it() {
 /// A malformed `custom_doc` costs that skill its document, never the resolution.
 #[test]
 fn a_malformed_custom_doc_leaves_the_row_without_a_document() {
-    let set = resolve(
+    let set = crate::company::skill_set::resolve_company(
         None,
         &[],
         &[delta(
@@ -187,7 +187,7 @@ fn a_malformed_custom_doc_leaves_the_row_without_a_document() {
 /// reaches the set either.
 #[test]
 fn a_delta_with_an_unsafe_slug_is_skipped() {
-    let set = resolve(
+    let set = crate::company::skill_set::resolve_company(
         None,
         &[],
         &[delta("../escape", true, SkillSource::Custom, None)],
@@ -211,7 +211,7 @@ fn a_registry_delta_with_no_snapshot_contributes_no_document() {
         extra_frontmatter: Vec::new(),
     }];
 
-    let set = resolve(
+    let set = crate::company::skill_set::resolve_company(
         None,
         &library,
         &[delta("competitor-scan", true, SkillSource::Registry, None)],
@@ -232,7 +232,7 @@ fn a_malformed_company_bundle_fails_the_resolution() {
     std::fs::create_dir_all(&broken).unwrap();
     std::fs::write(broken.join("SKILL.md"), "no frontmatter here\n").unwrap();
 
-    assert!(resolve(Some(tmp.path()), &[], &[]).is_err());
+    assert!(crate::company::skill_set::resolve_company(Some(tmp.path()), &[], &[]).is_err());
 }
 
 /// `docs/spec/runtime/manifest-semantics.md` promises that a scope naming a
@@ -284,8 +284,14 @@ fn an_unknown_scope_entry_is_dropped_with_a_warning_naming_the_agent_and_the_slu
         .with_ansi(false)
         .finish();
     let guard = tracing::subscriber::set_default(subscriber);
-    let set = resolve_for_agent(None, &[], &[], "copywriter", Some(&scope))
-        .expect("an unknown entry drops rather than failing the load");
+    let set = crate::company::skill_set::resolve_company_for_agent(
+        None,
+        &[],
+        &[],
+        "copywriter",
+        Some(&scope),
+    )
+    .expect("an unknown entry drops rather than failing the load");
     drop(guard);
 
     assert_eq!(

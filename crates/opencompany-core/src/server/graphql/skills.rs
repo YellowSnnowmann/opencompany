@@ -197,7 +197,7 @@ pub(crate) async fn resolve_company(
     ));
 
     Ok(project(
-        &skill_effective::resolve(runtime.source_dir(), &registry, &deltas)?,
+        &crate::company::skill_set::resolve_company(runtime.source_dir(), &registry, &deltas)?,
         &registry,
         &crate::server::ops::skills::scope::roster_scopes(runtime).await?,
     ))

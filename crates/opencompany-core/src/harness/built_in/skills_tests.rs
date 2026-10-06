@@ -1,6 +1,7 @@
 use super::*;
 
 use crate::company::parse_skill_md;
+use crate::company::skill_effective;
 use crate::ports::skills_state::SkillSource;
 
 /// Writes a company-dir `skills/<slug>/SKILL.md` (plus an optional resource).

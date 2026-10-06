@@ -38,7 +38,7 @@ fn skill_md_frontmatter_resists_injection() {
 /// The projection every `GET …/skills` row goes through, over the same
 /// resolution the harness materializes.
 fn list(source_dir: Option<&FsPath>, deltas: &[SkillState]) -> Vec<InstalledSkill> {
-    skill_effective::resolve(source_dir, &[], deltas)
+    crate::company::skill_set::resolve_company(source_dir, &[], deltas)
         .expect("resolves")
         .iter()
         .map(|skill| InstalledSkill::from_effective(skill, &[]))
@@ -168,7 +168,7 @@ fn the_list_unions_bundles_with_deltas() {
 fn a_malformed_company_bundle_surfaces_as_an_error() {
     let tmp = tempfile::tempdir().unwrap();
     write_bundle(tmp.path(), "broken", "no frontmatter here\n");
-    assert!(skill_effective::resolve(Some(tmp.path()), &[], &[]).is_err());
+    assert!(crate::company::skill_set::resolve_company(Some(tmp.path()), &[], &[]).is_err());
 }
 
 /// The REST list and the GraphQL resolver project the same resolution, so
@@ -203,7 +203,8 @@ fn the_rest_list_and_the_graphql_resolver_agree() {
         },
     ];
 
-    let effective = skill_effective::resolve(Some(tmp.path()), &[], &deltas).expect("resolves");
+    let effective = crate::company::skill_set::resolve_company(Some(tmp.path()), &[], &deltas)
+        .expect("resolves");
     let rest: Vec<InstalledSkill> = effective
         .iter()
         .map(|skill| InstalledSkill::from_effective(skill, &[]))
