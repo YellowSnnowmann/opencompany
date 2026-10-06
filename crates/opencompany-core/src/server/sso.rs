@@ -158,11 +158,21 @@ async fn redeem_from_host(
     if subject.is_empty() || state.config().bootstrap_admin().as_deref() != Some(subject.as_str()) {
         return Ok(invalid_token());
     }
-    if !ConsumedJtis::new(state.home(), &CompanyId::new("sso-bootstrap"))
+    // Record single use without dead-ending a legitimate replay — the same
+    // reasoning as `redeem_for_runtime`. The token has verified (signature +
+    // expiry) and its `sub` is the proven bootstrap admin, so a replay within the
+    // token's validity is the owner retrying a first-run link whose response was
+    // lost while the fresh company was still coming up. Re-issue the same
+    // short-lived setup session rather than refusing it; the registry is still
+    // empty, so the outcome is identical and the replay is idempotent.
+    let first_use = ConsumedJtis::new(state.home(), &CompanyId::new("sso-bootstrap"))
         .consume(&claims.jti, claims.exp)
-        .await?
-    {
-        return Ok(invalid_token());
+        .await?;
+    if !first_use {
+        tracing::info!(
+            company = %company,
+            "sso bootstrap token re-redeemed within validity; re-issuing setup session"
+        );
     }
     let Some(session) = crate::server::users::cookie::session_header_value(&company, &body.token)
     else {
@@ -303,14 +313,28 @@ async fn redeem_for_runtime(
         return Ok(invalid_token());
     }
 
-    // Single use: record the jti before minting a session. `consume` is an
-    // atomic `create_new`, so two requests racing on one token cannot both win —
-    // and a replay of a still-valid token finds the marker already there.
-    let consumed = ConsumedJtis::new(state.home(), runtime.id())
+    // Record single use, but do not dead-end a legitimate replay. `consume` is an
+    // atomic `create_new`: the first redemption creates the marker and returns
+    // `true`; a replay of the same token finds it present and returns `false`. By
+    // this point the token has already proven itself — signature and expiry
+    // (`verify_token`), scope (`claimed == runtime.id()`), and a standing-admin
+    // `sub` — so a `false` here is the rightful admin redeeming a *still-valid*
+    // link again, not an attack. On the hosted path this happens when the first
+    // redemption's session never reached the browser: the company was cold
+    // (hibernated) when the link was opened, and the response was lost while it
+    // woke. Refusing the retry would strand the owner on "already used" holding an
+    // otherwise-perfect link. Re-mint instead — the outcome is a session for the
+    // same proven admin either way, so the replay is idempotent, not
+    // privilege-granting. The token's own short expiry (verified above) bounds how
+    // long a replay stays possible.
+    let first_use = ConsumedJtis::new(state.home(), runtime.id())
         .consume(&claims.jti, claims.exp)
         .await?;
-    if !consumed {
-        return Ok(invalid_token());
+    if !first_use {
+        tracing::info!(
+            company = %runtime.id(),
+            "sso token re-redeemed within its validity window; re-minting session"
+        );
     }
 
     // Claim the admin on first use, or log the existing account in. The `sub`
