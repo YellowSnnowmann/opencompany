@@ -297,5 +297,8 @@ fn strip_fence_line(src: &str) -> Option<&str> {
 }
 
 #[cfg(test)]
+#[path = "skill_file_pins_tests.rs"]
+mod pins_tests;
+#[cfg(test)]
 #[path = "skill_file_tests.rs"]
 mod tests;
