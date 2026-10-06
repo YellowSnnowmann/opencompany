@@ -50,7 +50,13 @@ export function ChannelPill({
       title={open ? "Hide details" : "Show details"}
       data-testid="channel-pill"
       className={cn(
-        "group/pill absolute top-2 left-1/2 z-20 flex max-w-[60%] -translate-x-1/2 items-center gap-2 rounded-full border border-foreground/10 bg-page/80 py-1 pr-3 pl-1 text-sm font-medium shadow-sm backdrop-blur-md transition-colors",
+        // z-30, not z-20: the transcript's sticky day-divider (`MessageTimeline.tsx`)
+        // is also z-20 and lives in the same stacking context, so they tied and
+        // whichever painted later (the divider, on most scrolls) covered this
+        // pill's name/avatar. This pill is the persistent "who is this"
+        // identity chrome; the divider is transient timeline content, so it
+        // must lose that tie, not win it by DOM-order accident.
+        "group/pill absolute top-2 left-1/2 z-30 flex max-w-[60%] -translate-x-1/2 items-center gap-2 rounded-full border border-foreground/10 bg-page/80 py-1 pr-3 pl-1 text-sm font-medium shadow-sm backdrop-blur-md transition-colors",
         "hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         open && "bg-muted",
       )}
