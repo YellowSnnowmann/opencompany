@@ -132,7 +132,7 @@ pub enum McpSource {
 /// with — a stdio install would fail on `npx: not found`. One function so the
 /// two places that can refuse an install — the catalogue pre-check at the route
 /// and the post-install belt in
-/// [`McpRuntime`](crate::harness::mcp::McpRuntime) — say the same sentence, and
+/// [`McpRuntime`](crate::mcp::runtime::McpRuntime) — say the same sentence, and
 /// so the day a sidecar makes stdio runnable there is one message to retire.
 pub fn stdio_install_refusal(qualified_name: &str) -> String {
     format!(

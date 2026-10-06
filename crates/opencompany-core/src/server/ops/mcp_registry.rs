@@ -11,7 +11,7 @@
 //! only ever contain what somebody already knew the address of, so the tab is
 //! empty until it is pasted into.
 //!
-//! **List B** is [`McpRuntime`](crate::harness::mcp::McpRuntime), a wrapper over
+//! **List B** is [`McpRuntime`](crate::mcp::runtime::McpRuntime), a wrapper over
 //! OpenHuman's own MCP registry: two upstream directories (Smithery.ai and
 //! `modelcontextprotocol/registry`), a SQLite store of installs, named
 //! write-only env credentials, and a boot-time connect + supervisor. It is

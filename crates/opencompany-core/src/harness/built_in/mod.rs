@@ -122,7 +122,6 @@ pub mod hosting;
 mod iteration_cap_turn_tests;
 pub mod ledger_tools;
 pub mod lifecycle;
-pub mod mcp;
 /// Recovering a tool call that a model on the **native** transport wrote into
 /// its message body as prose instead of emitting it through the structured
 /// channel. Validated against the tools the turn itself offered — the marker a
@@ -314,7 +313,7 @@ pub struct HarnessDeps {
     /// (`{root}/{company}/{agent}/workspace`).
     pub workspace_root: PathBuf,
     /// The company home's MCP store directory — `<home>/mcp`, the same one
-    /// [`McpRuntime`](crate::harness::mcp::McpRuntime) is built over.
+    /// [`McpRuntime`](crate::mcp::runtime::McpRuntime) is built over.
     ///
     /// Carried because OpenHuman's `mcp_registry_*` tools take a config now
     /// instead of reading a process global, and the toolbelt has to hand them

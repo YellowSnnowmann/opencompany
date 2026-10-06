@@ -958,7 +958,7 @@ async fn discover_tools(
             })),
         )
             .into_response(),
-        Some(decl) => match crate::harness::mcp::discover_tools(&decls, &name).await {
+        Some(decl) => match crate::mcp::agent::discover_tools(&decls, &name).await {
             Ok(tools) => Json(tools).into_response(),
             Err(err) => {
                 // NEVER surface the raw error — it can carry a response body or a

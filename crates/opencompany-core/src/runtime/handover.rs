@@ -120,7 +120,7 @@ pub struct RuntimeHandover {
     #[cfg(feature = "openhuman")]
     pub(crate) search_backend: Option<crate::harness::search::SearchBackend>,
     #[cfg(feature = "mcp")]
-    pub(crate) mcp: Option<Arc<crate::harness::mcp::McpRuntime>>,
+    pub(crate) mcp: Option<Arc<crate::mcp::runtime::McpRuntime>>,
 }
 
 impl std::fmt::Debug for RuntimeHandover {

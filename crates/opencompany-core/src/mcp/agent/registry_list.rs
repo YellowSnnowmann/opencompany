@@ -19,7 +19,7 @@ use tinytools::{PermissionLevel, Tool, ToolResult};
 use crate::runtime::tools::grants_cover_registry_server;
 use openhuman_core::mcp::registry::types::{InstalledServer, Transport};
 
-use crate::harness::mcp::McpRuntime;
+use crate::mcp::runtime::McpRuntime;
 
 /// One install as an agent may see it.
 ///

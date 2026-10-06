@@ -116,16 +116,16 @@ use crate::company::inference::store as inference_store;
 use crate::harness::HarnessDeps;
 use crate::harness::built_in::provider::HarnessModel;
 use crate::harness::file_tool_outputs::WritePromotion;
-#[cfg(feature = "mcp")]
-use crate::harness::mcp::{
-    OcMcpCallTool, OcMcpRegistryInstalledListTool, OcMcpRegistryScopedTool, capability_brief,
-    granted_policies, granted_secrets, registry_for_agent,
-};
 use crate::harness::orchestrator;
 use crate::harness::policy::ApprovalPolicy;
 use crate::harness::skills::EffectiveSkills;
 use crate::harness::toolbelt;
 use crate::hive::mcp_server::{McpAttach, attach_opencompany_mcp};
+#[cfg(feature = "mcp")]
+use crate::mcp::agent::{
+    OcMcpCallTool, OcMcpRegistryInstalledListTool, OcMcpRegistryScopedTool, capability_brief,
+    granted_policies, granted_secrets, registry_for_agent,
+};
 use crate::ports::skills_state::SkillState;
 use crate::ports::types::CompanyId;
 use crate::runtime::tools::{NAMESPACE_SEPARATORS, extends_on_boundary};
@@ -426,7 +426,7 @@ pub fn build_agent_with_model(
         match deps.mcp_home.clone() {
             Some(mcp_home) => {
                 mcp_registry_wired = true;
-                let config = std::sync::Arc::new(crate::harness::mcp::McpRuntime::config_for(
+                let config = std::sync::Arc::new(crate::mcp::runtime::McpRuntime::config_for(
                     mcp_home.clone(),
                 ));
                 // Enumeration, so the two tools below have a `server_id` to
@@ -434,7 +434,7 @@ pub fn build_agent_with_model(
                 // dial string and the install's config blob, so this is our own
                 // tool rather than a decorator over it.
                 tools.push(Box::new(OcMcpRegistryInstalledListTool::new(
-                    std::sync::Arc::new(crate::harness::mcp::McpRuntime::new(mcp_home)),
+                    std::sync::Arc::new(crate::mcp::runtime::McpRuntime::new(mcp_home)),
                     grants.to_vec(),
                 )));
                 tools.push(Box::new(OcMcpRegistryScopedTool::new(
@@ -1131,7 +1131,7 @@ pub fn build_agent_with_model(
         // those names that actually run for a company agent now — can reach
         // this company's own registered servers by name. See
         // `embed_servers_for_agent`'s doc comment for the full story.
-        company_mcp_servers = crate::harness::mcp::embed_servers_for_agent(
+        company_mcp_servers = crate::mcp::agent::embed_servers_for_agent(
             &deps.mcp_servers,
             &manifest_agent.id,
             grants,
@@ -1159,7 +1159,7 @@ pub fn build_agent_with_model(
             mcp_security,
             secrets,
             deps.mcp_failures.clone(),
-            crate::harness::mcp::McpMetering {
+            crate::mcp::agent::McpMetering {
                 company: company.clone(),
                 agent: manifest_agent.id.clone(),
                 meter: deps.meter.clone(),
@@ -1184,7 +1184,7 @@ pub fn build_agent_with_model(
         let installs: Vec<crate::mcp::decl::families::RegistryServerRow> =
             match deps.mcp_home.clone() {
                 Some(mcp_home) if crate::company::grants_mcp_registry_explicit(grants) => {
-                    match crate::harness::mcp::McpRuntime::new(mcp_home).list() {
+                    match crate::mcp::runtime::McpRuntime::new(mcp_home).list() {
                         Ok(installs) => installs
                             .iter()
                             .map(|install| crate::mcp::decl::families::RegistryServerRow {

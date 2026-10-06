@@ -3812,7 +3812,7 @@ impl RuntimeBuilder {
             match handover.as_ref().and_then(|h| h.mcp.clone()) {
                 Some(mcp) => runtime.set_mcp(mcp),
                 None => {
-                    let mcp = Arc::new(crate::harness::mcp::McpRuntime::new(home.join("mcp")));
+                    let mcp = Arc::new(crate::mcp::runtime::McpRuntime::new(home.join("mcp")));
                     runtime.set_mcp(mcp.clone());
                     tokio::spawn(async move { mcp.boot().await });
                 }

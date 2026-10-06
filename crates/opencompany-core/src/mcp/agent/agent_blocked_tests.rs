@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use crate::harness::mcp::{McpFailureQueue, McpMetering};
-use crate::harness::mcp::{OcMcpCallTool, granted_policies, registry_for_agent};
+use crate::mcp::agent::{McpFailureQueue, McpMetering};
+use crate::mcp::agent::{OcMcpCallTool, granted_policies, registry_for_agent};
 use crate::mcp::policy::{ApprovalMode, McpToolPolicies, ToolPolicy};
 
 use super::tests::{decl, grants};
@@ -175,7 +175,7 @@ fn a_disabled_server_contributes_no_policy() {
 /// point — the question is what the spec receives.
 fn attachment(server: McpServerDecl) -> String {
     let attached =
-        crate::harness::mcp::embed_servers_for_agent(&[server], AGENT, &grants(&["mcp:*"]));
+        crate::mcp::agent::embed_servers_for_agent(&[server], AGENT, &grants(&["mcp:*"]));
     assert_eq!(attached.len(), 1);
     format!("{attached:?}")
 }

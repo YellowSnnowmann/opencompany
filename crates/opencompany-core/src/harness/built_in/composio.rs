@@ -1135,7 +1135,7 @@ mod live {
     }
 
     /// A scrubbed error result — the tenant token is stripped from any error
-    /// body (mirrors [`crate::harness::mcp`]'s failure handling).
+    /// body (mirrors [`crate::mcp::agent`]'s failure handling).
     ///
     /// `{err:#}` renders the whole cause chain, not just its outermost layer.
     /// The managed client's errors are single-level so the two used to read
