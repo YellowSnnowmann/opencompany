@@ -27,9 +27,15 @@ pub struct SkillDoc {
 
 `parse_skill_md` and `render_skill_md`
 ([`company/skill_file.rs`](../../crates/opencompany-core/src/company/skill_file.rs))
-round-trip it. The parser is hand-written — a `---`-fenced block of
-`key: value` lines — with no YAML dependency, and it preserves the body verbatim
-so OpenHuman's own parser sees exactly what was authored.
+round-trip it over `tinyskills::parse_flat` and `render_flat`: a `---`-fenced
+block of `key: value` lines read line by line rather than as YAML, the body
+preserved verbatim so OpenHuman's own parser sees exactly what was authored.
+OC adds only the slug and its own slug-labelled errors. Slug derivation and
+checks (`tinyskills::SlugRules`, as `skill_validate::SLUG_RULES`), the
+frontmatter-size and description-length checks, the install digest
+(`tinyskills::document_digest`), the content scan and the upload archive
+reader are tinyskills calls too; OC keeps the limits and the operator-facing
+sentences.
 
 `version` is **descriptive only**. Nothing compares or orders it. It rides
 inside a registry install's snapshot so that a future "update available"
@@ -212,9 +218,7 @@ Three gates, shared by every write path and living together in
 [`server/ops/skills/vet.rs`](../../crates/opencompany-core/src/server/ops/skills/vet.rs):
 the size cap, the scanner's verdict, and the per-company write lock.
 
-`scan_skill`
-([`company/skill_scan.rs`](../../crates/opencompany-core/src/company/skill_scan.rs))
-runs on install, authoring, upload, draft and update — every path that can put
+`tinyskills::scan_skill`, over `SkillDoc::scan_document`, runs on install, authoring, upload, draft and update — every path that can put
 text in front of an agent. It **warns** by default and **blocks** on three
 classes: invisible or bidirectional code points, hard-coded credentials, and a
 resource path that escapes the skill directory. A block writes nothing.
@@ -294,7 +298,7 @@ alias).
 | Author | `POST …/skills` → `create_custom` | `AdminScopedCompany` | assembles a `SKILL.md`, capped at `MAX_SKILL_DOC_BYTES` = 256 KiB on the assembled document |
 | Toggle | `PUT …/skills/{slug}` → `set_enabled` | `AdminScopedCompany` | read-modify-write under the per-company write lock |
 | Uninstall | `POST …/skills/{slug}/uninstall` → `uninstall` | `AdminScopedCompany` | `Registry` and `Custom` only; a `Company` bundle skill can only be disabled |
-| Upload | `POST …/skills/upload` → `upload` | `AdminScopedCompany` | multipart `.md` / `.zip` / `.skill`, one result row per file; archive hardening in [`company/skill_upload.rs`](../../crates/opencompany-core/src/company/skill_upload.rs) |
+| Upload | `POST …/skills/upload` → `upload` | `AdminScopedCompany` | multipart `.md` / `.zip` / `.skill`, one result row per file; read by `tinyskills::read_skill_archive` through [`company/skill_upload.rs`](../../crates/opencompany-core/src/company/skill_upload.rs) |
 | Draft | `POST …/skills/draft` → `draft` | `AdminScopedCompany` | writes nothing; returns a drafted document, scanned before it is shown |
 | Update | `POST …/skills/{slug}/update` → `update` | `AdminScopedCompany` | re-pins an install onto the library's current document, re-running the scan; refuses a locally edited copy |
 | Read a document | `GET …/skills/{slug}/doc` → `read_doc` | `ScopedCompany` (any member) | the whole `SKILL.md` an agent reads, resolved through the same effective set `GET …/skills` reports; a bundle entry off disk |
@@ -354,9 +358,13 @@ is called once per agent from `harness/built_in/build.rs`, into
 <workspace_root>/<company>/<agent>/skill-catalog/skills/<slug>/
 ```
 
-It writes each **enabled** skill's `SKILL.md` and bundled resources there and
-**rebuilds the tree from scratch on every call**, so a removed skill disappears
-rather than lingering. `HarnessPool::ensure` fetches the deltas at the top of
+It writes each **enabled** skill's `SKILL.md` and bundled resources there with
+`tinyskills::materialize_tree`, which **rebuilds the tree from scratch on every
+call**, so a removed skill disappears rather than lingering. A bundle is copied
+without its symlinks, a symlinked `skills/` root is unlinked rather than
+followed, a bundle nested more than 32 directories deep fails the step, and a
+skill whose slug is not a safe directory name is left out of the tree and the
+catalogue with a warning. `HarnessPool::ensure` fetches the deltas at the top of
 each cycle and rebuilds the roster when they differ, so a skill authored,
 enabled or disabled in the console reaches every agent on the next cycle with no
 process restart. An unchanged delta set is a no-op: the cached roster, and each
@@ -443,16 +451,16 @@ is written against this fact. It changes the day execution ships.
 
 | Concern | File |
 | --- | --- |
-| Document shape, parse and render | `crates/opencompany-core/src/company/skill_file.rs` |
+| Document shape, parse and render (over `tinyskills::parse_flat`) | `crates/opencompany-core/src/company/skill_file.rs` |
 | The effective-set fold, slug validation, `[globals].disable` synthesis | `crates/opencompany-core/src/company/skill_effective.rs` |
 | A company's layers and delta loading, shared by every reader | `crates/opencompany-core/src/company/skill_set.rs` |
 | The shared library and which directory a host serves it from | `crates/opencompany-core/src/company/skill_library.rs` |
 | Operator deltas (port + conformance) | `crates/opencompany-core/src/ports/skills_state.rs` |
 | Write routes | `crates/opencompany-core/src/server/ops/skills.rs`, and `skills/` beside it for registry, upload, draft and update |
 | Size cap, scan verdict, per-company lock | `crates/opencompany-core/src/server/ops/skills/vet.rs` |
-| Content scanning | `crates/opencompany-core/src/company/skill_scan.rs` |
-| Shared validation | `crates/opencompany-core/src/company/skill_validate.rs` |
-| Archive hardening | `crates/opencompany-core/src/company/skill_upload.rs` |
+| Content scanning | `tinyskills::scan_skill`, called from `server/ops/skills/vet.rs` |
+| Shared validation, slug rules | `crates/opencompany-core/src/company/skill_validate.rs` |
+| Upload reading (over `tinyskills::read_skill_archive`) | `crates/opencompany-core/src/company/skill_upload.rs` |
 | Install pin, drift, trust tier | `crates/opencompany-core/src/company/skill_provenance.rs` |
 | Per-agent scope: the derivation | `crates/opencompany-core/src/company/skill_scope.rs` |
 | Per-agent scope: the per-skill inversion | `crates/opencompany-core/src/company/skill_scope.rs` |
