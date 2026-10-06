@@ -610,7 +610,7 @@ pub(super) fn agent_skills(
 ) -> AgentSkillsDto {
     let requested = requested_skills(record, agent_id);
     AgentSkillsDto {
-        effective: crate::runtime::builder::agent_effective_skills(
+        effective: crate::company::skill_scope::agent_effective_skills(
             company_enabled,
             requested.as_deref(),
         ),

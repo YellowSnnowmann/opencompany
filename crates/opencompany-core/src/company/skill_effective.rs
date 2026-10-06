@@ -255,7 +255,7 @@ pub fn resolve(
 /// has no such switch, and the harness skips them anyway.
 ///
 /// The narrowing itself is
-/// [`agent_effective_skills`](crate::runtime::builder::agent_effective_skills),
+/// [`agent_effective_skills`](crate::company::skill_scope::agent_effective_skills),
 /// the same function the agent detail route reports from, so what the console
 /// says a teammate has and what the harness writes for it cannot drift.
 ///
@@ -286,7 +286,7 @@ pub fn resolve_for_agent(
         );
     }
     let scoped: HashSet<String> =
-        crate::runtime::builder::agent_effective_skills(&enabled, agent_skills)
+        crate::company::skill_scope::agent_effective_skills(&enabled, agent_skills)
             .into_iter()
             .collect();
     Ok(effective

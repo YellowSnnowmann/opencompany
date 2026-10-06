@@ -80,7 +80,7 @@ pub struct SkillAgentScope {
 /// ("inherits") is exactly the state that must not be inferred.
 ///
 /// `holds` comes from
-/// [`agent_effective_skills`](crate::runtime::builder::agent_effective_skills)
+/// [`agent_effective_skills`]
 /// — the function the harness materializes each agent's skill tree from —
 /// applied to a ceiling holding this slug alone. Narrowing filters the ceiling,
 /// so restricting the ceiling to one slug gives that slug's answer out of the
@@ -101,12 +101,9 @@ pub fn agents_for_skill(
         .map(|agent| SkillAgentScope {
             id: agent.id.clone(),
             state: state_for(slug, agent.requested.as_deref()),
-            holds: crate::runtime::builder::agent_effective_skills(
-                &ceiling,
-                agent.requested.as_deref(),
-            )
-            .iter()
-            .any(|held| held == slug),
+            holds: agent_effective_skills(&ceiling, agent.requested.as_deref())
+                .iter()
+                .any(|held| held == slug),
         })
         .collect()
 }
@@ -125,6 +122,47 @@ fn state_for(slug: &str, requested: Option<&[String]>) -> SkillScopeState {
     }
 }
 
+/// One agent's effective skill scope: its own `skills` narrowed against the
+/// company's enabled set, or that whole set when the agent lists none.
+///
+/// The same three states
+/// [`agent_effective_grants`](crate::runtime::builder::agent_effective_grants) resolves, over skill slugs:
+/// absent inherits every enabled skill, an explicit empty list is a deliberate
+/// no-skills scope, and a list narrows.
+///
+/// Compiled in **every** build for the same reason the grant narrowing is:
+/// the harness materializes from this and the agent detail route reports from
+/// it, and two derivations would let the console advertise a skill the harness
+/// never writes.
+///
+/// Entries match **exactly**. A tool glob selects a namespace with real
+/// hierarchy; a slug is a flat identifier, so a prefix would silently reach a
+/// skill installed after the scope was written. Filtering the enabled set rather
+/// than the request is what makes this narrow-only: a slug the company has not
+/// enabled — or has disabled — cannot survive, however it was spelled.
+pub(crate) fn agent_effective_skills(
+    company_enabled: &[String],
+    agent_skills: Option<&[String]>,
+) -> Vec<String> {
+    let scoped: Vec<String> = match agent_skills {
+        None => company_enabled.to_vec(),
+        Some([]) => Vec::new(),
+        Some(slugs) => company_enabled
+            .iter()
+            .filter(|enabled| slugs.iter().any(|want| want == *enabled))
+            .cloned()
+            .collect(),
+    };
+    let mut seen = std::collections::HashSet::new();
+    scoped
+        .into_iter()
+        .filter(|slug| seen.insert(slug.clone()))
+        .collect()
+}
+
 #[cfg(test)]
 #[path = "skill_scope_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "skill_scope_effective_tests.rs"]
+mod tests_effective;
