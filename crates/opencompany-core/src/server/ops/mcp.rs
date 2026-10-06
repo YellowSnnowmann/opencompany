@@ -27,9 +27,9 @@ use crate::company::mcp::{
     load_health, load_runtime_index, resolve_effective, save_runtime_index, store_auth,
     validate_one,
 };
-use crate::company::mcp_server_info::{self, McpServerInfo};
 use crate::company::runtime::CompanyRuntime;
 use crate::error::OpenCompanyError;
+use crate::mcp::decl::server_info::{self as mcp_server_info, McpServerInfo};
 use crate::metering::roster_display_names;
 use crate::ports::types::CompanyRecord;
 use crate::runtime::builder::agent_scoped_grants;

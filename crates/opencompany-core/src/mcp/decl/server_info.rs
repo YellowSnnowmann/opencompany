@@ -209,8 +209,8 @@ fn inline_image(bytes: &[u8]) -> Option<String> {
     if bytes.len() > MAX_ICON_BYTES {
         return None;
     }
-    let media_type = super::avatar::sniff_image(bytes)?;
-    super::avatar::check_image_dimensions(bytes).ok()?;
+    let media_type = crate::company::avatar::sniff_image(bytes)?;
+    crate::company::avatar::check_image_dimensions(bytes).ok()?;
     let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
     Some(format!("data:{media_type};base64,{encoded}"))
 }
@@ -222,5 +222,5 @@ pub async fn fetch_icon(_url: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-#[path = "mcp_server_info_tests.rs"]
+#[path = "server_info_tests.rs"]
 mod tests;

@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::company::mcp_policy::{
+use crate::mcp::policy::{
     ApprovalMode, McpToolInventory, McpToolPolicies, ToolPolicy, ToolTier, inventory_from_discovery,
 };
 
@@ -296,7 +296,7 @@ fn an_inherited_row_is_not_marked_an_override() {
 /// would silently become two, on servers that are not the same server.
 #[test]
 fn the_two_server_kinds_never_share_a_policy_key() {
-    use crate::company::mcp_policy::{registry_tool_policies_key, tool_policies_key};
+    use crate::mcp::policy::{registry_tool_policies_key, tool_policies_key};
     let same = "notion";
     assert_ne!(tool_policies_key(same), registry_tool_policies_key(same));
 }
@@ -304,7 +304,7 @@ fn the_two_server_kinds_never_share_a_policy_key() {
 /// …and the same for the inventory.
 #[test]
 fn the_two_server_kinds_never_share_an_inventory_key() {
-    use crate::company::mcp_policy::{registry_tool_inventory_key, tool_inventory_key};
+    use crate::mcp::policy::{registry_tool_inventory_key, tool_inventory_key};
     let same = "notion";
     assert_ne!(tool_inventory_key(same), registry_tool_inventory_key(same));
 }
@@ -315,7 +315,7 @@ fn the_two_server_kinds_never_share_an_inventory_key() {
 /// produce exactly what was stored.
 #[test]
 fn an_install_has_no_legacy_baseline_under_its_document() {
-    use crate::company::mcp_policy::{StoredPolicies, effective_policies};
+    use crate::mcp::policy::{StoredPolicies, effective_policies};
     let mut stored = McpToolPolicies::default();
     stored.overrides.insert(
         "search_pages".into(),

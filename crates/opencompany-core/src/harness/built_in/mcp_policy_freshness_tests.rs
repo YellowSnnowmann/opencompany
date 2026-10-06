@@ -46,8 +46,8 @@ endpoint = "https://notion.example/mcp"
 }
 
 fn decl_with(
-    tool_policies: crate::company::mcp_policy::McpToolPolicies,
-    tool_inventory: crate::company::mcp_policy::McpToolInventory,
+    tool_policies: crate::mcp::policy::McpToolPolicies,
+    tool_inventory: crate::mcp::policy::McpToolInventory,
 ) -> McpServerDecl {
     McpServerDecl {
         name: SERVER.to_string(),
@@ -71,7 +71,7 @@ fn decl_with(
 /// `ensure` instead of failing anything.
 #[test]
 fn the_policy_fold_is_independent_of_map_iteration_order() {
-    use crate::company::mcp_policy::{ApprovalMode, McpToolPolicies, ToolPolicy, ToolTier};
+    use crate::mcp::policy::{ApprovalMode, McpToolPolicies, ToolPolicy, ToolTier};
 
     let tools = [
         "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta",
@@ -107,7 +107,7 @@ fn the_policy_fold_is_independent_of_map_iteration_order() {
         .tier_defaults
         .insert(ToolTier::ReadOnly, ApprovalMode::Blocked);
 
-    let inventory = crate::company::mcp_policy::McpToolInventory::default();
+    let inventory = crate::mcp::policy::McpToolInventory::default();
     assert_eq!(
         mcp_fingerprint(&[decl_with(forward.clone(), inventory.clone())]),
         mcp_fingerprint(&[decl_with(backward, inventory.clone())]),
@@ -141,7 +141,7 @@ fn the_policy_fold_is_independent_of_map_iteration_order() {
 /// teammate is a requirement of the cache axis rather than tidiness.
 #[test]
 fn the_per_agent_half_is_a_canonical_fingerprint_term() {
-    use crate::company::mcp_policy::{
+    use crate::mcp::policy::{
         AgentToolPolicies, ApprovalMode, McpToolInventory, McpToolPolicies, ToolPolicy,
     };
 
@@ -213,7 +213,7 @@ fn the_per_agent_half_is_a_canonical_fingerprint_term() {
 /// discovery timestamp is not a term — while a newly discovered tool is.
 #[test]
 fn only_the_inventory_names_are_a_fingerprint_term() {
-    use crate::company::mcp_policy::{McpToolInventory, McpToolPolicies, ToolTier};
+    use crate::mcp::policy::{McpToolInventory, McpToolPolicies, ToolTier};
 
     let tools: std::collections::BTreeMap<String, ToolTier> =
         [("search_pages".to_string(), ToolTier::ReadOnly)]
@@ -360,13 +360,13 @@ async fn a_tool_policy_write_moves_the_mcp_fingerprint() {
         "the granted server must still reach the agent"
     );
     assert!(
-        crate::company::mcp_policy::blocked_tool_names(
+        crate::mcp::policy::blocked_tool_names(
             &decls
                 .iter()
                 .find(|decl| decl.name == SERVER)
                 .expect("declared server resolved")
                 .tool_policies,
-            &crate::company::mcp_policy::McpToolInventory::default(),
+            &crate::mcp::policy::McpToolInventory::default(),
         )
         .contains(&"delete_page".to_string()),
         "the blocked tool must be denied on the attachment the rebuild produced"
@@ -424,13 +424,13 @@ async fn a_per_agent_policy_write_moves_the_mcp_fingerprint() {
     // The rebuild carries the refusal, and carries it for that teammate only.
     let decls = pool.resolve_effective_mcp(&rec, &deps).await;
     let denied = |agent: &str| {
-        crate::company::mcp_policy::blocked_tool_names_for_agent(
+        crate::mcp::policy::blocked_tool_names_for_agent(
             &decls
                 .iter()
                 .find(|decl| decl.name == SERVER)
                 .expect("declared server resolved")
                 .tool_policies,
-            &crate::company::mcp_policy::McpToolInventory::default(),
+            &crate::mcp::policy::McpToolInventory::default(),
             agent,
         )
     };

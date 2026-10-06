@@ -15,7 +15,7 @@ use super::built_in_test_fixtures::*;
 use super::*;
 
 use crate::company::mcp::{AuthMaterial, McpSource};
-use crate::company::mcp_policy::{
+use crate::mcp::policy::{
     AgentToolPolicies, ApprovalMode, McpToolInventory, McpToolPolicies, ToolPolicy, ToolTier,
 };
 
@@ -262,9 +262,9 @@ fn a_hive_agents_prompt_names_no_server_it_cannot_call() {
     );
 
     let writer_brief =
-        crate::company::mcp_families::server_family_brief(&servers, &[], &reach, "writer");
+        crate::mcp::decl::families::server_family_brief(&servers, &[], &reach, "writer");
     let engineer_brief =
-        crate::company::mcp_families::server_family_brief(&servers, &[], &reach, "engineer");
+        crate::mcp::decl::families::server_family_brief(&servers, &[], &reach, "engineer");
 
     assert!(writer_brief.contains("`notion`"), "{writer_brief}");
     assert!(
@@ -305,7 +305,7 @@ fn the_server_family_brief_never_names_a_remote_mcp_tool() {
     let servers = vec![refused];
 
     for agent in ["writer", "engineer"] {
-        let brief = crate::company::mcp_families::server_family_brief(
+        let brief = crate::mcp::decl::families::server_family_brief(
             &servers,
             &[],
             &grants(&["mcp:notion"]),
@@ -378,7 +378,7 @@ async fn a_registry_install_blocked_for_one_agent_refuses_through_the_scoped_too
     crate::ports::SecretStore::set(
         secrets.as_ref(),
         &company,
-        &crate::company::mcp_policy::registry_tool_policies_key("notion-install"),
+        &crate::mcp::policy::registry_tool_policies_key("notion-install"),
         crate::ports::types::SecretValue(serde_json::to_string(&policies).expect("serializes")),
     )
     .await

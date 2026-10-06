@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::AppState;
 use crate::company::mcp::resolve_effective;
-use crate::company::mcp_policy;
 use crate::company::runtime::CompanyRuntime;
+use crate::mcp::policy as mcp_policy;
 use crate::server::error::ApiError;
 use crate::server::ops::mcp::{NamePath, manifest_servers};
 use crate::server::ops::{AdminScopedCompany, ScopedCompany, scoped};
@@ -27,25 +27,25 @@ use crate::server::ops::{AdminScopedCompany, ScopedCompany, scoped};
 pub struct ToolPolicyRowDto {
     pub tool: String,
     /// The tier this row is grouped and defaulted under.
-    pub effective_tier: crate::company::mcp_policy::ToolTier,
+    pub effective_tier: crate::mcp::policy::ToolTier,
     /// What discovery suggested, when it reached this tool. May legitimately
     /// disagree with `effectiveTier` — an operator can reclassify a row, and the
     /// console must render that without looking broken.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub suggested_tier: Option<crate::company::mcp_policy::ToolTier>,
+    pub suggested_tier: Option<crate::mcp::policy::ToolTier>,
     /// The mode enforced in this row's scope — the company's when the read is
     /// company-wide, this teammate's when it is scoped to one.
-    pub mode: crate::company::mcp_policy::ApprovalMode,
+    pub mode: crate::mcp::policy::ApprovalMode,
     /// Whether an operator decided anything about this row, as opposed to it
     /// inheriting. Derived here; never stored.
     pub is_override: bool,
     /// Which rule decided [`Self::mode`]. Host-resolved — one of its values names
     /// a discarded per-agent setting, which no client can derive from the mode.
-    pub source: crate::company::mcp_policy::PolicySource,
+    pub source: crate::mcp::policy::PolicySource,
     /// In an agent-scoped read, this teammate's stored mode — present even when
     /// the narrow-only clamp discarded it.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent_mode: Option<crate::company::mcp_policy::ApprovalMode>,
+    pub agent_mode: Option<crate::mcp::policy::ApprovalMode>,
     /// The teammates whose resolved mode for this tool differs from the company's.
     pub differing_agents: Vec<String>,
 }
@@ -61,7 +61,7 @@ pub struct ToolPolicyRowDto {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TierDefaultDto {
-    pub mode: crate::company::mcp_policy::ApprovalMode,
+    pub mode: crate::mcp::policy::ApprovalMode,
     pub stored: bool,
 }
 
@@ -99,11 +99,11 @@ impl ToolPolicyDto {
 /// and only the mode, the source and the stored per-agent value change.
 pub fn tool_policy_dto(
     server: &str,
-    policies: &crate::company::mcp_policy::McpToolPolicies,
-    inventory: &crate::company::mcp_policy::McpToolInventory,
+    policies: &crate::mcp::policy::McpToolPolicies,
+    inventory: &crate::mcp::policy::McpToolInventory,
     agent: Option<&str>,
 ) -> ToolPolicyDto {
-    use crate::company::mcp_policy::{
+    use crate::mcp::policy::{
         PolicySource, ToolTier, agent_policy_tool_names, default_mode_for, differing_agents,
         policy_tool_names, resolve_policy, resolve_policy_for_agent,
     };
@@ -207,7 +207,7 @@ pub struct PutToolPolicy {
     /// how it is changed, and naming it as nothing is how it is undone.
     #[serde(default)]
     pub tier_defaults:
-        Option<std::collections::HashMap<String, Option<crate::company::mcp_policy::ApprovalMode>>>,
+        Option<std::collections::HashMap<String, Option<crate::mcp::policy::ApprovalMode>>>,
     #[serde(default)]
     pub tools: Option<Vec<PutToolPolicyEntry>>,
 }
@@ -225,9 +225,9 @@ pub struct PutToolPolicy {
 pub struct PutToolPolicyEntry {
     pub tool: String,
     #[serde(default)]
-    pub tier: Option<crate::company::mcp_policy::ToolTier>,
+    pub tier: Option<crate::mcp::policy::ToolTier>,
     #[serde(default)]
-    pub mode: Option<crate::company::mcp_policy::ApprovalMode>,
+    pub mode: Option<crate::mcp::policy::ApprovalMode>,
 }
 
 /// Applies a PUT body to a stored document, returning the merged result or the
@@ -237,11 +237,11 @@ pub struct PutToolPolicyEntry {
 /// agent scope the merge is one level shallower — a teammate has modes, not
 /// tiers — and a per-agent tier is refused in either shape it could take.
 pub fn apply_tool_policy_patch(
-    mut stored: crate::company::mcp_policy::McpToolPolicies,
+    mut stored: crate::mcp::policy::McpToolPolicies,
     patch: PutToolPolicy,
     agent: Option<&str>,
-) -> Result<crate::company::mcp_policy::McpToolPolicies, String> {
-    use crate::company::mcp_policy::ToolTier;
+) -> Result<crate::mcp::policy::McpToolPolicies, String> {
+    use crate::mcp::policy::ToolTier;
 
     if patch.tier_defaults.is_none() && patch.tools.is_none() {
         return Err(
@@ -287,7 +287,7 @@ pub fn apply_tool_policy_patch(
                         .overrides
                         .insert(
                             tool.to_string(),
-                            crate::company::mcp_policy::ToolPolicy {
+                            crate::mcp::policy::ToolPolicy {
                                 tier: None,
                                 mode: Some(mode),
                             },
@@ -439,7 +439,7 @@ pub async fn require_roster_agent(
 async fn stored_strict(
     runtime: &CompanyRuntime,
     name: &str,
-) -> Result<crate::company::mcp_policy::McpToolPolicies, Box<Response>> {
+) -> Result<crate::mcp::policy::McpToolPolicies, Box<Response>> {
     mcp_policy::load_tool_policies_strict(
         runtime.id(),
         runtime.secrets().as_ref(),

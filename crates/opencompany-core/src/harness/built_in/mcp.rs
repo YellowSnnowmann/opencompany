@@ -123,8 +123,8 @@ pub fn granted_policies(
     decls: &[McpServerDecl],
     agent: &str,
     grants: &[String],
-) -> crate::company::mcp_policy::McpToolPolicySet {
-    crate::company::mcp_policy::McpToolPolicySet::from_declarations(
+) -> crate::mcp::policy::McpToolPolicySet {
+    crate::mcp::policy::McpToolPolicySet::from_declarations(
         agent,
         decls
             .iter()
@@ -223,7 +223,7 @@ pub fn embed_servers_for_agent(
             // Resolved for `agent`, so one teammate's refusal reaches only that
             // teammate's attachment.
             let mut denied = decl.disallowed_tools.clone();
-            for tool in crate::company::mcp_policy::blocked_tool_names_for_agent(
+            for tool in crate::mcp::policy::blocked_tool_names_for_agent(
                 &decl.tool_policies,
                 &decl.tool_inventory,
                 agent,
@@ -375,7 +375,7 @@ pub struct OcMcpCallTool {
     /// [`McpMetering`].
     metering: McpMetering,
     /// The granted servers' per-tool policies, consulted before dialling.
-    policies: crate::company::mcp_policy::McpToolPolicySet,
+    policies: crate::mcp::policy::McpToolPolicySet,
 }
 
 impl OcMcpCallTool {
@@ -388,7 +388,7 @@ impl OcMcpCallTool {
         secrets: Vec<String>,
         failures: McpFailureQueue,
         metering: McpMetering,
-        policies: crate::company::mcp_policy::McpToolPolicySet,
+        policies: crate::mcp::policy::McpToolPolicySet,
     ) -> Self {
         Self {
             registry,
@@ -487,9 +487,9 @@ impl Tool for OcMcpCallTool {
         // dispatched. Placed here rather than on one of the other two entry
         // points because both default to this one.
         if self.policies.is_blocked(&server, &tool) {
-            return Ok(ToolResult::error(
-                crate::company::mcp_policy::blocked_refusal(&server, &tool),
-            ));
+            return Ok(ToolResult::error(crate::mcp::policy::blocked_refusal(
+                &server, &tool,
+            )));
         }
         let arguments = args
             .get("arguments")

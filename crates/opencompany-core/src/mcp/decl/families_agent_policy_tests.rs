@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::company::mcp::{AuthMaterial, McpSource};
-use crate::company::mcp_policy::{
+use crate::mcp::policy::{
     AgentToolPolicies, ApprovalMode, McpToolInventory, McpToolPolicies, ToolPolicy, ToolTier,
 };
 

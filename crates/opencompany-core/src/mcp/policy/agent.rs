@@ -88,7 +88,7 @@ pub fn resolve_policy_for_agent(
     policies: &McpToolPolicies,
     agent: &str,
     tool: &str,
-    suggested: Option<crate::company::mcp_policy::ToolTier>,
+    suggested: Option<crate::mcp::policy::ToolTier>,
 ) -> ResolvedPolicyForAgent {
     let server = resolve_policy(policies, tool, suggested);
     let asked = policies

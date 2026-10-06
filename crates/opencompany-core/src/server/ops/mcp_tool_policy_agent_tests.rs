@@ -3,7 +3,7 @@
 
 use super::*;
 
-use crate::company::mcp_policy::{
+use crate::mcp::policy::{
     AgentToolPolicies, ApprovalMode, McpToolInventory, McpToolPolicies, PolicySource, ToolPolicy,
     ToolTier, inventory_from_discovery,
 };

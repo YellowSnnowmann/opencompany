@@ -280,7 +280,7 @@ impl CompanyManifest {
     /// that quietly is not the one you configured is worse than one that
     /// refuses to start.
     fn merge_bundle_mcp_servers(&mut self, bundle: &Path, path: &Path) -> Vec<String> {
-        let (servers, mut problems) = super::mcp_file::load_dir_mcp_servers(bundle);
+        let (servers, mut problems) = super::mcp::file::load_dir_mcp_servers(bundle);
         for server in servers {
             if self
                 .mcp_servers
@@ -291,7 +291,7 @@ impl CompanyManifest {
                     "mcp server `{}` is declared in both `{}` and `{}` — the two forms are \
                      exclusive per server, so keep one.",
                     server.name,
-                    super::mcp_file::MCP_FILE,
+                    super::mcp::file::MCP_FILE,
                     path.file_name()
                         .and_then(|name| name.to_str())
                         .unwrap_or(MANIFEST_FILE),

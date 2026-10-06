@@ -4811,7 +4811,7 @@ impl HarnessPool {
 ///
 /// The per-tool policy and the discovered inventory are terms too: the attached
 /// server's deny list is resolved from them, so a tool set to
-/// [`Blocked`](crate::company::mcp_policy::ApprovalMode::Blocked) would
+/// [`Blocked`](crate::mcp::policy::ApprovalMode::Blocked) would
 /// otherwise stay callable for as long as the cached roster stands.
 fn mcp_fingerprint(decls: &[McpServerDecl]) -> u64 {
     use std::collections::hash_map::DefaultHasher;
@@ -4839,17 +4839,17 @@ fn mcp_fingerprint(decls: &[McpServerDecl]) -> u64 {
 
 /// Folds one server's stored tool policy into the fingerprint, canonically.
 ///
-/// The company halves of [`McpToolPolicies`](crate::company::mcp_policy::McpToolPolicies)
+/// The company halves of [`McpToolPolicies`](crate::mcp::policy::McpToolPolicies)
 /// are `HashMap`-backed and iterate in an order that varies per map instance, so
 /// the tiers are read totally, in
-/// [`ToolTier::ALL`](crate::company::mcp_policy::ToolTier::ALL) order, and the
+/// [`ToolTier::ALL`](crate::mcp::policy::ToolTier::ALL) order, and the
 /// overrides through a [`BTreeMap`](std::collections::BTreeMap). The per-agent
 /// map is already a `BTreeMap` of `BTreeMap`s.
 fn hash_tool_policies<H: std::hash::Hasher>(
-    policies: &crate::company::mcp_policy::McpToolPolicies,
+    policies: &crate::mcp::policy::McpToolPolicies,
     hasher: &mut H,
 ) {
-    use crate::company::mcp_policy::{ApprovalMode, ToolTier};
+    use crate::mcp::policy::{ApprovalMode, ToolTier};
     use std::collections::BTreeMap;
     use std::hash::Hash;
 
@@ -4872,7 +4872,7 @@ fn hash_tool_policies<H: std::hash::Hasher>(
 /// `discovered_at_millis` is left out: every successful probe rewrites it, and a
 /// re-probe that learned nothing must not rebuild the roster.
 fn hash_tool_inventory<H: std::hash::Hasher>(
-    inventory: &crate::company::mcp_policy::McpToolInventory,
+    inventory: &crate::mcp::policy::McpToolInventory,
     hasher: &mut H,
 ) {
     use std::hash::Hash;
@@ -5561,7 +5561,7 @@ pub(crate) fn agent_mcp_reads(
     agent: &str,
     grants: &[String],
 ) -> crate::policy::McpReadSet {
-    crate::company::mcp_policy::mcp_allow_set_for_agent(&deps.mcp_servers, agent, grants)
+    crate::mcp::policy::mcp_allow_set_for_agent(&deps.mcp_servers, agent, grants)
 }
 
 /// The approval policy every roster teammate starts from, before the per-agent

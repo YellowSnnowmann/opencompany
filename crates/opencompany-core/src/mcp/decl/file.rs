@@ -9,7 +9,7 @@
 //!
 //! So a bundle may carry its servers the way it already carries its roster, its
 //! ledgers and its workflows: one file, authored beside the company it belongs
-//! to. [`load_dir_mcp_servers`] parses it and [`super::CompanyManifest`] merges
+//! to. [`load_dir_mcp_servers`] parses it and [`crate::company::CompanyManifest`] merges
 //! the result into `mcp_servers` before validation — see `company::manifest`.
 //!
 //! # Why JSON, and why the map key is the name
@@ -22,7 +22,7 @@
 //! The server's name is the **map key** rather than a field, which is the one
 //! thing this shape gets more right than the TOML array: a key cannot disagree
 //! with itself, so the `slug`-versus-filename refusal
-//! [`super::ledger_file`] needs has no equivalent here.
+//! [`crate::company::ledger_file`] needs has no equivalent here.
 //!
 //! # Why bad entries are dropped rather than the file refused
 //!
@@ -39,7 +39,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use crate::company::types::McpServer;
+use crate::company::McpServer;
 
 /// The bundle file holding one company's MCP server declarations.
 pub const MCP_FILE: &str = "mcp.json";
@@ -68,7 +68,7 @@ struct McpFile {
 /// camelCase on the wire, matching both the host convention this shape comes
 /// from and [`McpServer`]'s own console representation. Every field is optional:
 /// what a server must actually have is decided by
-/// [`validate_one`](super::mcp::validate_one), so this file and every other
+/// [`validate_one`](super::validate_one), so this file and every other
 /// declaration path stay on one validator.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -135,7 +135,7 @@ pub fn load_dir_mcp_servers(dir: &Path) -> (Vec<McpServer>, Vec<String>) {
 /// Parses one `mcp.json`, named by `file_name` for the problem messages.
 ///
 /// Every problem is written in prosumer language and against the file that
-/// carries it, matching [`super::ledger_file`] and [`super::agent_file`]: a
+/// carries it, matching [`crate::company::ledger_file`] and [`crate::company::agent_file`]: a
 /// template author reads the message, not the serde path.
 pub(crate) fn parse_mcp_file(file_name: &str, src: &str) -> (Vec<McpServer>, Vec<String>) {
     let file: McpFile = match serde_json::from_str(src) {
@@ -179,16 +179,14 @@ pub(crate) fn parse_mcp_file(file_name: &str, src: &str) -> (Vec<McpServer>, Vec
             allowed_tools: entry.allowed_tools,
             disallowed_tools: entry.disallowed_tools,
             read_only_tools: entry.read_only_tools,
-            timeout_secs: entry
-                .timeout_secs
-                .unwrap_or(super::mcp::DEFAULT_TIMEOUT_SECS),
+            timeout_secs: entry.timeout_secs.unwrap_or(super::DEFAULT_TIMEOUT_SECS),
             enabled: entry.enabled.unwrap_or(true),
             auth_secret: entry.auth_secret,
         };
 
         // The shared validator: name, `http(s)` endpoint, no stdio `command`, no
         // `user:pass@` userinfo. One set of rules for every declaration path.
-        let shared = super::mcp::validate_one(&label, &server);
+        let shared = super::validate_one(&label, &server);
         if !shared.is_empty() {
             problems.extend(
                 shared
@@ -205,7 +203,7 @@ pub(crate) fn parse_mcp_file(file_name: &str, src: &str) -> (Vec<McpServer>, Vec
         // agent's first tool call instead of here, where somebody is looking.
         // Unlike a packaged default, a bundle server may name an `auth_secret`:
         // that names a key, and the token itself is written per company.
-        if super::mcp::has_query_credential(&server.endpoint) {
+        if super::has_query_credential(&server.endpoint) {
             problems.push(format!(
                 "{label} in `{file_name}` has a credential in its `endpoint` query string — this \
                  file is committed, so name an `authSecret` key and write the token from the \
@@ -221,5 +219,5 @@ pub(crate) fn parse_mcp_file(file_name: &str, src: &str) -> (Vec<McpServer>, Vec
 }
 
 #[cfg(test)]
-#[path = "mcp_file_tests.rs"]
+#[path = "file_tests.rs"]
 mod tests;

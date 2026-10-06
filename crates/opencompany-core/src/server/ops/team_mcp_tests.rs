@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 
 use crate::company::CompanyManifest;
-use crate::company::mcp_policy;
+use crate::mcp::policy as mcp_policy;
 use crate::ports::types::{CompanyId, SecretValue};
 use crate::ports::{CompanyRecord, SecretStore};
 

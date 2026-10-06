@@ -67,6 +67,9 @@ pub mod ingest;
 /// `derived/` folder. The task board is registered here as a native ledger so
 /// one discovery surface reaches every one of them.
 pub mod ledger;
+/// MCP tool servers: declarations, per-tool policy, probing, the registry
+/// runtime, and what each agent reaches. See [`mcp`].
+pub mod mcp;
 /// A company's memory: OpenHuman's memory engine scoped to the company's root,
 /// one node per teammate (`docs/spec/runtime/memory-engine.md`).
 pub mod memory;

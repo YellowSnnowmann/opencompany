@@ -16,7 +16,7 @@ use tinytools::{
     ToolScope, ToolTimeout,
 };
 
-use crate::company::mcp_policy as policy;
+use crate::mcp::policy;
 use crate::policy::consequence::{MCP_REGISTRY_SERVER_KEY, MCP_REGISTRY_TOOL_KEY};
 use crate::ports::SecretStore;
 use crate::ports::types::CompanyId;

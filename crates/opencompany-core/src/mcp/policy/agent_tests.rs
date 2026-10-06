@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::company::mcp::{AuthMaterial, McpSource};
-use crate::company::mcp_policy::{ToolTier, blocked_tool_names, mcp_allow_set};
+use crate::mcp::policy::{ToolTier, blocked_tool_names, mcp_allow_set};
 
 const EVERY_MODE: [ApprovalMode; 3] = [
     ApprovalMode::AlwaysAllow,

@@ -31,10 +31,29 @@
 use serde::{Deserialize, Serialize};
 
 use crate::Result;
-use crate::company::types::McpServer;
+use crate::company::McpServer;
 use crate::error::OpenCompanyError;
 use crate::ports::SecretStore;
 use crate::ports::types::{CompanyId, SecretValue};
+
+/// The one rule that decides whether two MCP records name the same server,
+/// shared by the console's server list and the agent prompt that tells a model
+/// which dispatch tool reaches which server.
+pub(crate) mod endpoint;
+/// Which of an agent's two MCP dispatch tools reaches which connected server,
+/// rendered for its system prompt. Ungated: the prompt is composed from company
+/// data, and the rule is worth testing without a harness build.
+#[cfg_attr(not(all(feature = "openhuman", feature = "mcp")), allow(dead_code))]
+pub(crate) mod families;
+/// The bundle's MCP declaration file: `companies/<name>/mcp.json`. A vertical
+/// ships the tool servers its work needs the way it already ships its ledgers,
+/// rather than starting with an empty tool surface somebody has to fill in by
+/// hand from the console before the company can do anything.
+pub mod file;
+/// What an MCP server says about itself — its own title, description, website
+/// and icon, read off the `serverInfo` block of its `initialize` reply and kept
+/// beside its health record.
+pub mod server_info;
 
 /// The [`SecretStore`](crate::ports::SecretStore) key holding the JSON runtime
 /// server index (a `Vec<McpServer>` of console-added servers + manifest
@@ -45,7 +64,7 @@ pub const RUNTIME_INDEX_KEY: &str = "mcp/servers";
 ///
 /// Lives here rather than beside [`McpServer`] because every declaration path
 /// defaults it — the manifest through serde, `mcp.json` through
-/// [`super::mcp_file`] — and two spellings of "30" is how they come to disagree.
+/// [`file`] — and two spellings of "30" is how they come to disagree.
 pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
 /// The canonical per-server credential key. A server's outbound token is stored
@@ -287,13 +306,13 @@ pub struct McpServerDecl {
     pub auth: AuthMaterial,
     /// The operator's stored per-tool approval policy, layered over
     /// [`read_only_tools`](Self::read_only_tools) by
-    /// [`effective_policies`](super::mcp_policy::effective_policies). Empty
+    /// [`effective_policies`](crate::mcp::policy::effective_policies). Empty
     /// until [`resolve_effective`] fills it.
-    pub tool_policies: super::mcp_policy::McpToolPolicies,
+    pub tool_policies: crate::mcp::policy::McpToolPolicies,
     /// The tools discovery last saw on this server and the tier each was
     /// suggested under. Empty until [`resolve_effective`] fills it, and empty
     /// for a server discovery has never reached.
-    pub tool_inventory: super::mcp_policy::McpToolInventory,
+    pub tool_inventory: crate::mcp::policy::McpToolInventory,
 }
 
 impl McpServerDecl {
@@ -309,8 +328,8 @@ impl McpServerDecl {
             enabled: server.enabled,
             source,
             auth: AuthMaterial::None,
-            tool_policies: super::mcp_policy::McpToolPolicies::default(),
-            tool_inventory: super::mcp_policy::McpToolInventory::default(),
+            tool_policies: crate::mcp::policy::McpToolPolicies::default(),
+            tool_inventory: crate::mcp::policy::McpToolInventory::default(),
         }
     }
 }
@@ -387,7 +406,7 @@ pub fn effective_mcp_servers(
 /// their `read_only_tools` declarations name.
 ///
 /// Test-only: it ignores the stored tool policy, so it is the differential
-/// oracle for [`mcp_allow_set`](super::mcp_policy::mcp_allow_set), which is
+/// oracle for [`mcp_allow_set`](crate::mcp::policy::mcp_allow_set), which is
 /// what every gate reads. A disabled server contributes nothing.
 #[cfg(test)]
 pub fn mcp_read_set(servers: &[McpServerDecl]) -> crate::policy::McpReadSet {
@@ -699,20 +718,20 @@ pub async fn resolve_effective(
         // no MCP servers", so one unreadable policy key would strip every
         // server from every agent. The gate's face degrades that one server to
         // all-park instead.
-        let stored = super::mcp_policy::load_tool_policies(
+        let stored = crate::mcp::policy::load_tool_policies(
             company,
             secrets,
-            &super::mcp_policy::tool_policies_key(&decl.name),
+            &crate::mcp::policy::tool_policies_key(&decl.name),
         )
         .await;
-        decl.tool_policies = super::mcp_policy::effective_policies(&decl.read_only_tools, stored);
+        decl.tool_policies = crate::mcp::policy::effective_policies(&decl.read_only_tools, stored);
         // Threaded here, before any route can store a tier default. Without it
         // a tier default resolves against nothing: the tool is never
         // enumerated, so the operator's decision is silently not enforced.
-        decl.tool_inventory = super::mcp_policy::load_tool_inventory(
+        decl.tool_inventory = crate::mcp::policy::load_tool_inventory(
             company,
             secrets,
-            &super::mcp_policy::tool_inventory_key(&decl.name),
+            &crate::mcp::policy::tool_inventory_key(&decl.name),
         )
         .await;
     }
@@ -997,9 +1016,9 @@ fn normalize_tools(tools: &[String]) -> Vec<String> {
 }
 
 #[cfg(test)]
-#[path = "mcp_tests.rs"]
+#[path = "decl_tests.rs"]
 mod tests;
 
 #[cfg(test)]
-#[path = "mcp_store_tests.rs"]
+#[path = "decl_store_tests.rs"]
 mod store_tests;

@@ -49,7 +49,7 @@ use axum::routing::{delete, get, post, put};
 use crate::AppState;
 use crate::company::McpServer;
 use crate::company::mcp::{McpHealth, McpSource};
-use crate::company::mcp_endpoint::normalize_endpoint;
+use crate::mcp::decl::endpoint::normalize_endpoint;
 use crate::server::ops::mcp::{McpServerDto, RosterAgentDto};
 use crate::server::ops::scoped;
 

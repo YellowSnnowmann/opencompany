@@ -6,9 +6,9 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use crate::company::mcp_policy::{ApprovalMode, McpToolPolicies, ToolPolicy};
 use crate::harness::mcp::{McpFailureQueue, McpMetering};
 use crate::harness::mcp::{OcMcpCallTool, granted_policies, registry_for_agent};
+use crate::mcp::policy::{ApprovalMode, McpToolPolicies, ToolPolicy};
 
 use super::tests::{decl, grants};
 
@@ -248,18 +248,18 @@ fn a_blocked_tier_default_denies_the_inventoried_tools() {
     let mut server = decl("notion", DEAD_ENDPOINT);
     let mut policies = McpToolPolicies::default();
     policies.tier_defaults.insert(
-        crate::company::mcp_policy::ToolTier::WriteDelete,
+        crate::mcp::policy::ToolTier::WriteDelete,
         ApprovalMode::Blocked,
     );
     server.tool_policies = policies;
-    let mut inventory = crate::company::mcp_policy::McpToolInventory::default();
+    let mut inventory = crate::mcp::policy::McpToolInventory::default();
     inventory.tools.insert(
         "delete_page".to_string(),
-        crate::company::mcp_policy::ToolTier::WriteDelete,
+        crate::mcp::policy::ToolTier::WriteDelete,
     );
     inventory.tools.insert(
         "read_page".to_string(),
-        crate::company::mcp_policy::ToolTier::ReadOnly,
+        crate::mcp::policy::ToolTier::ReadOnly,
     );
     server.tool_inventory = inventory;
 

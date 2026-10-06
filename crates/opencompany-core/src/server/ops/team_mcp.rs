@@ -16,9 +16,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::AppState;
 use crate::company::mcp::{McpServerDecl, resolve_effective};
-use crate::company::mcp_policy;
 use crate::company::runtime::CompanyRuntime;
 use crate::error::OpenCompanyError;
+use crate::mcp::policy as mcp_policy;
 use crate::runtime::tools::grants_cover_server;
 use crate::server::error::ApiError;
 use crate::server::ops::mcp::manifest_servers;

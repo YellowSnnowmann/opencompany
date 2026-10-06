@@ -11,9 +11,9 @@
 use std::sync::{Arc, Mutex};
 
 use crate::company::mcp::{McpHealth, McpServerDecl, McpStatus};
-use crate::company::mcp_policy;
-use crate::company::mcp_server_info;
 use crate::harness::mcp::registry_from_decls;
+use crate::mcp::decl::server_info as mcp_server_info;
+use crate::mcp::policy as mcp_policy;
 use crate::ports::SecretStore;
 use crate::ports::now_millis;
 use crate::ports::types::CompanyId;
@@ -443,7 +443,7 @@ pub struct ProbeOutcome {
     pub listing: Option<Vec<(String, Option<String>)>>,
     /// The `serverInfo` block the handshake settled on, `Some` only when the
     /// probe got that far. Untyped by the protocol, so it is carried raw and
-    /// read by [`mcp_server_info`](crate::company::mcp_server_info).
+    /// read by [`mcp_server_info`](crate::mcp::decl::server_info).
     pub server_info: Option<serde_json::Value>,
 }
 

@@ -6,7 +6,7 @@ use super::built_in_test_fixtures::*;
 use super::*;
 use crate::company::McpServer;
 use crate::company::mcp::{effective_mcp_servers, mcp_read_set};
-use crate::company::mcp_policy::{ApprovalMode, ToolPolicy, mcp_allow_set};
+use crate::mcp::policy::{ApprovalMode, ToolPolicy, mcp_allow_set};
 
 /// A server whose manifest declaration and stored policy disagree both ways:
 /// `search_pages` is declared read-only but the operator requires approval

@@ -320,7 +320,7 @@ fn operator_message_is_actionable_and_scrubbed() {
 use std::collections::HashMap as StdHashMap;
 use std::sync::Mutex as StdMutex;
 
-use crate::company::mcp_policy::{ToolTier, load_tool_inventory, tool_inventory_key};
+use crate::mcp::policy::{ToolTier, load_tool_inventory, tool_inventory_key};
 use crate::ports::SecretStore;
 use crate::ports::types::SecretValue;
 
@@ -451,7 +451,7 @@ async fn a_probe_records_what_the_server_says_about_itself() {
     let health = probe_and_record(&company, &decl, &secrets).await;
     assert_eq!(health.status, McpStatus::Ok, "{}", health.message);
 
-    let info = crate::company::mcp_server_info::load(&company, "fixture", &secrets).await;
+    let info = crate::mcp::decl::server_info::load(&company, "fixture", &secrets).await;
     assert_eq!(info.title.as_deref(), Some("Fixture Docs"));
     assert_eq!(
         info.description.as_deref(),
@@ -468,7 +468,7 @@ async fn a_probe_records_what_the_server_says_about_itself() {
 /// earlier standing, for the same reason it leaves the inventory alone.
 #[tokio::test]
 async fn a_failed_probe_leaves_the_previous_description_standing() {
-    use crate::company::mcp_server_info::{self, McpServerInfo};
+    use crate::mcp::decl::server_info::{self as mcp_server_info, McpServerInfo};
 
     let company = CompanyId::new("acme");
     let secrets = RecordingSecrets::default();
@@ -497,7 +497,7 @@ async fn a_failed_probe_leaves_the_previous_description_standing() {
 /// earlier, such as the directory's, while its own title still wins.
 #[tokio::test]
 async fn a_probe_keeps_a_stored_logo_the_handshake_does_not_replace() {
-    use crate::company::mcp_server_info::{self, McpServerInfo};
+    use crate::mcp::decl::server_info::{self as mcp_server_info, McpServerInfo};
 
     let addr = self_describing_fixture().await;
     let company = CompanyId::new("acme");

@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
-use super::mcp::McpServerDecl;
+use crate::mcp::decl::McpServerDecl;
 
 mod agent;
 
@@ -729,11 +729,11 @@ pub async fn save_tool_inventory(
 }
 
 #[cfg(test)]
-#[path = "mcp_policy_tests.rs"]
+#[path = "policy_tests.rs"]
 mod tests;
 
 /// `reset_company_policy`: preserving `agents` on a company-wide reset, and
 /// falling back to the full wipe when the document cannot be read.
 #[cfg(test)]
-#[path = "mcp_policy_reset_tests.rs"]
+#[path = "policy_reset_tests.rs"]
 mod reset_tests;

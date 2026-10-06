@@ -1181,13 +1181,13 @@ pub fn build_agent_with_model(
     // so the brief never names a tool this agent does not hold.
     #[cfg(feature = "mcp")]
     {
-        let installs: Vec<crate::company::mcp_families::RegistryServerRow> =
+        let installs: Vec<crate::mcp::decl::families::RegistryServerRow> =
             match deps.mcp_home.clone() {
                 Some(mcp_home) if crate::company::grants_mcp_registry_explicit(grants) => {
                     match crate::harness::mcp::McpRuntime::new(mcp_home).list() {
                         Ok(installs) => installs
                             .iter()
-                            .map(|install| crate::company::mcp_families::RegistryServerRow {
+                            .map(|install| crate::mcp::decl::families::RegistryServerRow {
                                 server_id: install.server_id.clone(),
                                 display_name: install.display_name.clone(),
                                 endpoint: install.transport.deployment_url().map(str::to_string),
@@ -1211,7 +1211,7 @@ pub fn build_agent_with_model(
                 }
                 _ => Vec::new(),
             };
-        persona.push_str(&crate::company::mcp_families::server_family_brief(
+        persona.push_str(&crate::mcp::decl::families::server_family_brief(
             &deps.mcp_servers,
             &installs,
             grants,

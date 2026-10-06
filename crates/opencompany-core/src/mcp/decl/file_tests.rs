@@ -22,10 +22,7 @@ fn reads_a_server_and_takes_its_name_from_the_key() {
     );
     // Defaults an author did not have to write.
     assert!(servers[0].enabled);
-    assert_eq!(
-        servers[0].timeout_secs,
-        super::super::mcp::DEFAULT_TIMEOUT_SECS
-    );
+    assert_eq!(servers[0].timeout_secs, super::super::DEFAULT_TIMEOUT_SECS);
 }
 
 #[test]

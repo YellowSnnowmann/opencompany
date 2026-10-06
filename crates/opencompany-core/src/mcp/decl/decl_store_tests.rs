@@ -206,7 +206,7 @@ fn secret_in_query_is_a_non_blocking_advisory() {
 
 // ---- per-tool policy resolution ---------------------------------------
 
-use crate::company::mcp_policy::{
+use crate::mcp::policy::{
     ApprovalMode, McpToolPolicies, ToolPolicy, ToolTier, resolve_policy, save_tool_policies,
     tool_policies_key,
 };
@@ -357,7 +357,7 @@ async fn the_policy_flattener_reproduces_the_declaration_flattener() {
         .unwrap();
 
     let before = mcp_read_set(&decls);
-    let after = crate::company::mcp_policy::mcp_allow_set(&decls);
+    let after = crate::mcp::policy::mcp_allow_set(&decls);
 
     let servers = ["notion", "linear", "archive", "ghost"];
     let tools = ["search_pages", "get_page", "read_doc", "move_page", "ghost"];
@@ -397,7 +397,7 @@ async fn a_disabled_server_contributes_no_allow() {
     let decls = resolve_effective(&company, &[], &differential_fixture(), &secrets)
         .await
         .unwrap();
-    let allow = crate::company::mcp_policy::mcp_allow_set(&decls);
+    let allow = crate::mcp::policy::mcp_allow_set(&decls);
     assert!(allow.contains("notion", "search_pages"));
     assert!(!allow.contains("archive", "read_doc"));
 }
@@ -417,10 +417,10 @@ async fn the_flattener_never_promotes_a_merely_suggested_read() {
         .await
         .unwrap();
     assert_eq!(
-        crate::company::mcp_policy::suggest_tool_tier("search_pages", None),
+        crate::mcp::policy::suggest_tool_tier("search_pages", None),
         ToolTier::ReadOnly
     );
-    assert!(crate::company::mcp_policy::mcp_allow_set(&decls).is_empty());
+    assert!(crate::mcp::policy::mcp_allow_set(&decls).is_empty());
 }
 
 /// Only `AlwaysAllow` reaches the set. The cross-product above cannot pin this:
@@ -458,7 +458,7 @@ async fn only_always_allow_reaches_the_set() {
     let decls = resolve_effective(&company, &[], &manifest, &secrets)
         .await
         .unwrap();
-    let allow = crate::company::mcp_policy::mcp_allow_set(&decls);
+    let allow = crate::mcp::policy::mcp_allow_set(&decls);
     assert!(allow.contains("notion", "search_pages"));
     assert!(!allow.contains("notion", "move_page"));
     assert!(!allow.contains("notion", "delete_page"));
@@ -494,14 +494,14 @@ async fn a_stored_refusal_overrides_the_declaration() {
         .unwrap();
     assert!(mcp_read_set(&decls).contains("notion", "search_pages"));
     assert!(
-        !crate::company::mcp_policy::mcp_allow_set(&decls).contains("notion", "search_pages"),
+        !crate::mcp::policy::mcp_allow_set(&decls).contains("notion", "search_pages"),
         "a stored refusal must win over the declaration"
     );
 }
 
 // ---- the inventory is what a tier default resolves against ------------
 
-use crate::company::mcp_policy::{
+use crate::mcp::policy::{
     McpToolInventory, inventory_from_discovery, registry_tool_inventory_key, save_tool_inventory,
     tool_inventory_key,
 };
@@ -539,7 +539,7 @@ async fn a_tier_default_reaches_the_tools_discovery_found() {
     let decls = resolve_effective(&company, &[], &manifest, &secrets)
         .await
         .unwrap();
-    let allow = crate::company::mcp_policy::mcp_allow_set(&decls);
+    let allow = crate::mcp::policy::mcp_allow_set(&decls);
     // `search_pages` is suggested read-only, so the bulk default reaches it.
     assert!(allow.contains("notion", "search_pages"));
     // `move_page` is not, so it keeps parking.
@@ -569,7 +569,7 @@ async fn without_an_inventory_a_tier_default_reaches_nothing() {
         .await
         .unwrap();
     assert!(decls[0].tool_inventory.tools.is_empty());
-    assert!(crate::company::mcp_policy::mcp_allow_set(&decls).is_empty());
+    assert!(crate::mcp::policy::mcp_allow_set(&decls).is_empty());
 }
 
 /// A suggested tier still cannot allow on its own — the inventory supplies the
@@ -593,7 +593,7 @@ async fn an_inventory_alone_grants_nothing() {
         decls[0].tool_inventory.suggested("search_pages"),
         Some(ToolTier::ReadOnly)
     );
-    assert!(crate::company::mcp_policy::mcp_allow_set(&decls).is_empty());
+    assert!(crate::mcp::policy::mcp_allow_set(&decls).is_empty());
 }
 
 /// An unreadable inventory degrades that server only, and the declaration it
@@ -621,7 +621,7 @@ async fn an_unreadable_inventory_does_not_disturb_the_declaration() {
         .unwrap();
     assert_eq!(decls[0].tool_inventory, McpToolInventory::default());
     assert!(
-        crate::company::mcp_policy::mcp_allow_set(&decls).contains("notion", "search_pages"),
+        crate::mcp::policy::mcp_allow_set(&decls).contains("notion", "search_pages"),
         "the declared read-only tool must survive an unreadable inventory"
     );
 }
@@ -665,7 +665,7 @@ async fn clearing_a_tier_default_returns_its_tools_to_the_gate() {
         .await
         .unwrap();
     assert!(
-        crate::company::mcp_policy::mcp_allow_set(&decls).contains("notion", "search_pages"),
+        crate::mcp::policy::mcp_allow_set(&decls).contains("notion", "search_pages"),
         "the allow has to be in force before clearing it can mean anything"
     );
 
@@ -688,7 +688,7 @@ async fn clearing_a_tier_default_returns_its_tools_to_the_gate() {
         .await
         .unwrap();
     assert!(
-        !crate::company::mcp_policy::mcp_allow_set(&decls).contains("notion", "search_pages"),
+        !crate::mcp::policy::mcp_allow_set(&decls).contains("notion", "search_pages"),
         "with nothing stored the suggestion is back on its own, and a suggestion asks"
     );
 }
@@ -737,7 +737,7 @@ async fn clearing_a_tier_default_leaves_a_per_tool_decision_alone() {
     let decls = resolve_effective(&company, &[], &manifest, &secrets)
         .await
         .unwrap();
-    let allow = crate::company::mcp_policy::mcp_allow_set(&decls);
+    let allow = crate::mcp::policy::mcp_allow_set(&decls);
     assert!(
         allow.contains("notion", "move_page"),
         "the operator decided this row itself, and the tier is not what carried it"

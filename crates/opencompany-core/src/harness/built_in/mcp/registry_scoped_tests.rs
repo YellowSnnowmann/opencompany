@@ -12,11 +12,11 @@ use serde_json::{Value, json};
 use tinytools::{PermissionLevel, Tool, ToolCallOptions, ToolResult};
 
 use super::OcMcpRegistryScopedTool;
-use crate::company::mcp_policy::{
+use crate::error::Result;
+use crate::mcp::policy::{
     ApprovalMode, McpToolInventory, McpToolPolicies, ToolPolicy, ToolTier, blocked_refusal,
     registry_tool_inventory_key, registry_tool_policies_key,
 };
-use crate::error::Result;
 use crate::ports::SecretStore;
 use crate::ports::types::{CompanyId, SecretValue};
 

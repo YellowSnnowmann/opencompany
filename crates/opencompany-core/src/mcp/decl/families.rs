@@ -23,8 +23,8 @@
 
 use std::collections::BTreeMap;
 
-use super::mcp::McpServerDecl;
-use super::mcp_endpoint::normalize_endpoint;
+use super::McpServerDecl;
+use super::endpoint::normalize_endpoint;
 use crate::runtime::tools::{grants_cover_registry_server, grants_cover_server};
 
 /// How many servers a brief names before it stops naming them.
@@ -184,7 +184,7 @@ pub(crate) fn server_family_brief(
                  server)"
             ));
         }
-        if crate::company::mcp_policy::every_known_tool_refused(decl, agent) {
+        if crate::mcp::policy::every_known_tool_refused(decl, agent) {
             line.push_str(
                 " — but every tool this server currently offers is refused to you, so a call \
                  will be declined. Say so rather than retrying.",
@@ -231,10 +231,10 @@ pub(crate) fn server_family_brief(
 }
 
 #[cfg(test)]
-#[path = "mcp_families_tests.rs"]
+#[path = "families_tests.rs"]
 mod tests;
 
 /// What the brief says about a server one teammate is refused everything on.
 #[cfg(test)]
-#[path = "mcp_families_agent_policy_tests.rs"]
+#[path = "families_agent_policy_tests.rs"]
 mod agent_policy_tests;
