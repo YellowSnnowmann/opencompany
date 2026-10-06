@@ -10,10 +10,11 @@
 
 use std::sync::Arc;
 
-use crate::company::{parse_skill_md, skill_digest};
+use crate::company::parse_skill_md;
 use crate::ports::skills_state::{SkillInstall, SkillSource, SkillState};
 use crate::ports::types::CompanyId;
 use crate::server::router;
+use tinyskills::document_digest;
 
 use super::graphql_test_group_1::query;
 use super::graphql_test_support_1::*;
@@ -56,7 +57,7 @@ async fn seed(state: &crate::AppState, stored: &str, pinned: &str) {
                 custom_doc: Some(stored.to_string()),
                 updated_at_millis: Some(1_700_000_000_000),
                 install: Some(SkillInstall {
-                    digest: skill_digest(pinned),
+                    digest: document_digest(pinned),
                     version: parse_skill_md(SLUG, pinned).unwrap().version,
                     installed_by: None,
                     installed_at_millis: 1_700_000_000_000,

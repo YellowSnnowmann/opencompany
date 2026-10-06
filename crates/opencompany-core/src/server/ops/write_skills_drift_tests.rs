@@ -9,8 +9,9 @@ use axum::http::StatusCode;
 use serde_json::{Value, json};
 
 use super::write_test_support::*;
-use crate::company::{render_skill_md, skill_digest};
+use crate::company::render_skill_md;
 use crate::ports::skills_state::{SkillInstall, SkillSource, SkillState};
+use tinyskills::document_digest;
 
 /// A slug the global baseline does not ship, so the row under test is the
 /// delta's own and not a baseline entry a delta happens to supersede.
@@ -31,7 +32,7 @@ fn pinned_delta(stored: &str, pinned: &str) -> SkillState {
         custom_doc: Some(stored.to_string()),
         updated_at_millis: Some(1_700_000_000_000),
         install: Some(SkillInstall {
-            digest: skill_digest(pinned),
+            digest: document_digest(pinned),
             version: version_of(pinned),
             installed_by: None,
             installed_at_millis: 1_700_000_000_000,
@@ -218,6 +219,6 @@ async fn an_install_answers_current_and_unmodified() {
         .expect("the library entry");
     assert_eq!(
         row.install.expect("the install pinned").digest,
-        skill_digest(&render_skill_md(live))
+        document_digest(&render_skill_md(live))
     );
 }

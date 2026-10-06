@@ -10,11 +10,11 @@ use axum::http::StatusCode;
 use serde_json::{Value, json};
 
 use super::write_test_support::*;
-use crate::company::skill_digest;
 use crate::ports::EventSeq;
 use crate::ports::skills_state::SkillTier;
 use crate::ports::skills_state::{SkillInstall, SkillSource, SkillState};
 use crate::ports::types::{CompanyId, SkillChange};
+use tinyskills::document_digest;
 
 const SLUG: &str = "library-skill";
 
@@ -67,7 +67,7 @@ fn pinned_delta(stored: &str, pinned: &str) -> SkillState {
         custom_doc: Some(stored.to_string()),
         updated_at_millis: Some(1_700_000_000_000),
         install: Some(SkillInstall {
-            digest: skill_digest(pinned),
+            digest: document_digest(pinned),
             version: crate::company::parse_skill_md(SLUG, pinned)
                 .expect("the fixture parses")
                 .version,
@@ -110,7 +110,7 @@ async fn installing_from_the_library_journals_one_registry_row() {
         .expect("the install stored a row");
     assert_eq!(
         row["digest"],
-        json!(skill_digest(stored.custom_doc.as_deref().unwrap())),
+        json!(document_digest(stored.custom_doc.as_deref().unwrap())),
         "the row anchors to the document that was written"
     );
 }
@@ -188,7 +188,7 @@ async fn updating_an_install_journals_an_updated_row() {
         .expect("the update stored a row");
     assert_eq!(
         row["digest"],
-        json!(skill_digest(stored.custom_doc.as_deref().unwrap())),
+        json!(document_digest(stored.custom_doc.as_deref().unwrap())),
         "the row anchors to the document the update wrote, not the one it replaced"
     );
 }

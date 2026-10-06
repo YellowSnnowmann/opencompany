@@ -25,7 +25,7 @@ fn library_doc(version: &str, body: &str) -> SkillDoc {
 /// An install pin over `doc`, exactly as the install route records one.
 fn pin(doc: &SkillDoc) -> SkillInstall {
     SkillInstall {
-        digest: skill_digest(&render_skill_md(doc)),
+        digest: document_digest(&render_skill_md(doc)),
         version: doc.version.clone(),
         installed_by: None,
         installed_at_millis: 1_700_000_000_000,

@@ -425,7 +425,7 @@ fn registry_heal<'a>(
         return None;
     }
     if let (Some(install), Some(stored_doc)) = (&delta.install, &delta.custom_doc)
-        && crate::company::skill_digest(stored_doc) != install.digest
+        && tinyskills::document_digest(stored_doc) != install.digest
     {
         return None;
     }

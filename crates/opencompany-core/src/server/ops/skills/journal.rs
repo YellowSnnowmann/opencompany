@@ -15,10 +15,11 @@
 //! tell an audit reader that a re-pin happened when none did.
 
 use crate::company::runtime::CompanyRuntime;
-use crate::company::{skill_digest, trust_tier};
+use crate::company::trust_tier;
 use crate::ports::skills_state::{SkillSource, SkillState};
 use crate::ports::types::{Actor, CompanyEvent, SkillChange};
 use crate::server::error::ApiError;
+use tinyskills::document_digest;
 
 /// Records a write that stored a document.
 ///
@@ -37,7 +38,7 @@ pub(super) async fn journal_write(
         &delta.slug,
         change,
         delta.source,
-        delta.custom_doc.as_deref().map(skill_digest),
+        delta.custom_doc.as_deref().map(document_digest),
     )
     .await
 }

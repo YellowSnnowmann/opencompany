@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use super::*;
-use crate::company::skill_digest;
+use tinyskills::document_digest;
 
 fn companies_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../companies")
@@ -40,7 +40,7 @@ fn shipped_skill_files() -> Vec<PathBuf> {
 /// Every shipped `SKILL.md`, parsed and re-rendered, digested and pinned.
 ///
 /// `render` is the digest of `render_skill_md(parse_skill_md(src))`, `source`
-/// is `skill_digest(src)` — the value a registry install pins — and `extra` is
+/// is `document_digest(src)` — the value a registry install pins — and `extra` is
 /// the digest of the frontmatter lines the parser keeps aside. A parser or
 /// renderer swap that moves any of the three for any shipped skill would shift
 /// the pin an existing install was recorded against.
@@ -67,9 +67,9 @@ fn every_shipped_skill_parses_and_renders_to_its_pinned_digest() {
             .replace('\\', "/");
         rows.push(format!(
             "{rel} render={} source={} extra={}",
-            skill_digest(&render_skill_md(&doc)),
-            skill_digest(&src),
-            skill_digest(&doc.extra_frontmatter.join("\n")),
+            document_digest(&render_skill_md(&doc)),
+            document_digest(&src),
+            document_digest(&doc.extra_frontmatter.join("\n")),
         ));
     }
     rows.sort_unstable();

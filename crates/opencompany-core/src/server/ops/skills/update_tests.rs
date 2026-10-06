@@ -10,10 +10,11 @@ use axum::http::StatusCode;
 use serde_json::{Value, json};
 
 use crate::AppState;
-use crate::company::{render_skill_md, skill_digest};
+use crate::company::render_skill_md;
 use crate::ports::skills_state::{SkillInstall, SkillSource, SkillState};
 use crate::server::ops::language;
 use crate::server::ops::write_test_support::*;
+use tinyskills::document_digest;
 
 /// A slug the global baseline does not ship, so the row under test is the
 /// delta's own.
@@ -42,7 +43,7 @@ fn pinned_delta(stored: &str, pinned: &str, enabled: bool) -> SkillState {
         custom_doc: Some(stored.to_string()),
         updated_at_millis: Some(1_700_000_000_000),
         install: Some(SkillInstall {
-            digest: skill_digest(pinned),
+            digest: document_digest(pinned),
             version: crate::company::parse_skill_md(SLUG, pinned)
                 .expect("the fixture parses")
                 .version,
@@ -225,7 +226,7 @@ async fn updating_re_pins_the_install_to_the_library_document() {
         "the store holds the library's own document"
     );
     let install = row.install.expect("the update re-pinned");
-    assert_eq!(install.digest, skill_digest(&expected));
+    assert_eq!(install.digest, document_digest(&expected));
     assert_eq!(install.version.as_deref(), Some("2.0.0"));
     assert!(
         install.installed_by.is_some(),

@@ -83,7 +83,7 @@ fn skill_changed_carries_no_document_body() {
 /// recorded, so an audit row and a pin can be matched.
 #[test]
 fn the_digest_on_the_row_is_the_one_the_install_recorded() {
-    let pinned = crate::company::skill_provenance::skill_digest(BODY);
+    let pinned = tinyskills::document_digest(BODY);
     let event = CompanyEvent::SkillChanged {
         slug: "web-research".to_string(),
         change: SkillChange::Installed,

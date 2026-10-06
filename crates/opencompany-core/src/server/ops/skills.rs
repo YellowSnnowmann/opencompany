@@ -33,7 +33,6 @@ use crate::company::skill_set;
 use crate::company::skill_validate::{MAX_SLUG_CHARS, slugify, validate_slug, validate_slug_shape};
 use crate::company::{
     SkillDoc, SkillDrift, VersionChange, effective_drift, parse_skill_md, render_skill_md,
-    skill_digest,
 };
 use crate::error::OpenCompanyError;
 use crate::ports::now_millis;
@@ -42,6 +41,7 @@ use crate::ports::types::SkillChange;
 use crate::server::error::ApiError;
 use crate::server::ops::language;
 use crate::server::ops::{AdminScopedCompany, ScopedCompany, scoped};
+use tinyskills::document_digest;
 
 /// The default category stamped on a skill whose doc carries none.
 const DEFAULT_CATEGORY: &str = "Ops";
@@ -323,7 +323,7 @@ async fn install(
         Some(doc) => {
             let rendered = render_skill_md(doc);
             let pin = SkillInstall {
-                digest: skill_digest(&rendered),
+                digest: document_digest(&rendered),
                 version: doc.version.clone(),
                 installed_by: Some(company.actor()),
                 installed_at_millis: now_millis(),
