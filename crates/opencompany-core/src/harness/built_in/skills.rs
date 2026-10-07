@@ -34,6 +34,7 @@ use openhuman_core as oh;
 
 use oh::config::Config;
 use oh::skills::tools::{WorkflowDescribeTool, WorkflowListTool, WorkflowReadResourceTool};
+use tinyskills::cap_std::{ambient_authority, fs::Dir};
 use tinyskills::{MaterializeEntry, MaterializeSource, materialize_tree, sanitize_catalogue_text};
 use tinytools::Tool;
 
@@ -66,6 +67,12 @@ pub struct EffectiveSkills {
     workspace_dir: PathBuf,
     /// The enabled effective skill docs, ordered by slug.
     docs: Vec<SkillDoc>,
+}
+
+fn open_dir(path: &Path) -> crate::Result<Dir> {
+    Dir::open_ambient_dir(path, ambient_authority()).map_err(|e| {
+        OpenCompanyError::Harness(format!("opening skill directory {}: {e}", path.display()))
+    })
 }
 
 impl EffectiveSkills {
@@ -128,7 +135,7 @@ impl EffectiveSkills {
                 continue;
             }
             let source = match content.body {
-                SkillBody::Bundle(src) => MaterializeSource::Dir(src),
+                SkillBody::Bundle(src) => MaterializeSource::Dir(Arc::new(open_dir(&src)?)),
                 SkillBody::Inline(body) => MaterializeSource::Document(body),
             };
             entries.push(MaterializeEntry {
@@ -139,7 +146,14 @@ impl EffectiveSkills {
         }
 
         let skills_out = workspace_dir.join("skills");
-        let report = materialize_tree(&skills_out, &entries).map_err(|e| {
+        std::fs::create_dir_all(&workspace_dir).map_err(|e| {
+            OpenCompanyError::Harness(format!(
+                "creating skill workspace {}: {e}",
+                workspace_dir.display()
+            ))
+        })?;
+        let parent = open_dir(&workspace_dir)?;
+        let report = materialize_tree(&parent, "skills", &entries).map_err(|e| {
             OpenCompanyError::Harness(format!(
                 "materializing skill tree {}: {e}",
                 skills_out.display()

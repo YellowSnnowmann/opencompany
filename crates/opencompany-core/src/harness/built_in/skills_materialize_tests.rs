@@ -119,3 +119,45 @@ fn a_bundle_whose_directory_is_not_a_safe_name_is_left_out_of_tree_and_catalogue
     assert!(eff.docs.iter().all(|doc| doc.slug != "My Skill"));
     assert!(!eff.catalogue().contains("My Skill"));
 }
+
+#[test]
+fn a_bundle_file_over_the_size_limit_fails_the_materialization() {
+    let src = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let bundle = seed(src.path(), "big");
+    std::fs::File::create(bundle.join("huge.bin"))
+        .unwrap()
+        .set_len(tinyskills::MAX_MATERIALIZE_FILE_BYTES + 1)
+        .unwrap();
+
+    let Err(error) = materialize(ws.path(), src.path()) else {
+        panic!("a bundle with an oversized file materialized");
+    };
+    let message = error.to_string();
+    assert!(
+        message.contains(&format!(
+            "is larger than {} bytes",
+            tinyskills::MAX_MATERIALIZE_FILE_BYTES
+        )),
+        "{message}"
+    );
+    assert!(!ws.path().join("skills").join("big").exists());
+}
+
+#[test]
+fn a_workspace_that_does_not_exist_yet_is_created() {
+    let src = tempfile::tempdir().unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    let workspace = ws.path().join("not").join("yet");
+    seed(src.path(), "plain");
+
+    materialize(&workspace, src.path()).unwrap();
+
+    assert!(
+        workspace
+            .join("skills")
+            .join("plain")
+            .join("SKILL.md")
+            .is_file()
+    );
+}
