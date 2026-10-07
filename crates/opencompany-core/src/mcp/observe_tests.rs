@@ -384,3 +384,40 @@ async fn an_off_observer_meters_and_records_nothing_visible() {
     let failures = AgentMcpObserver::off().observe(&[completed(&result)]).await;
     assert_eq!(failures.len(), 1);
 }
+
+#[tokio::test]
+async fn a_credential_typed_as_the_server_or_tool_name_is_scrubbed() {
+    let decl = decl(
+        "https://unused.test/mcp",
+        AuthMaterial::Bearer(TOKEN.to_string()),
+        &[],
+    );
+    let outcome = McpCallOutcome::failed(
+        TOKEN,
+        format!("{TOKEN}-tool"),
+        tinymcp::McpCallError::new(tinymcp::tinymcp_bus::errors::RPC),
+    );
+    let event = AgentProgress::ToolCallCompleted {
+        call_id: "c".to_string(),
+        tool_name: "mcp_call_tool".to_string(),
+        success: false,
+        output_chars: 0,
+        output: format!("mcp_call_tool failed: mcp error response: no server {TOKEN}"),
+        arguments: None,
+        elapsed_ms: 1,
+        iteration: 1,
+        failure: None,
+        display_label: None,
+        display_detail: None,
+        structured: serde_json::to_value(&outcome).ok(),
+    };
+    let failures = fixture(&decl).observer.observe(&[event]).await;
+    assert_eq!(failures.len(), 1);
+    assert!(
+        !failures[0].server.contains(TOKEN),
+        "{}",
+        failures[0].server
+    );
+    assert!(!failures[0].tool.contains(TOKEN), "{}", failures[0].tool);
+    assert!(!failures[0].scrubbed_message.contains(TOKEN));
+}

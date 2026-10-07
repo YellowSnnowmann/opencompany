@@ -135,13 +135,18 @@ impl AgentMcpObserver {
 
     /// The scrubbed failure an unanswered call amounts to, or `None` when the
     /// outcome is a refusal rather than a failure.
+    ///
+    /// The server and tool are the names the caller typed, so they are
+    /// scrubbed with every declared server's credentials, like the message.
     fn failure(&self, outcome: &McpCallOutcome, output: &str) -> Option<McpFailure> {
         let error = outcome.error.as_ref()?;
         let decl = self.servers.iter().find(|decl| decl.name == outcome.server);
         let auth_configured = decl.is_some_and(|decl| decl.auth.is_configured());
-        let secrets = decl
-            .map(|decl| decl.auth.secret_values())
-            .unwrap_or_default();
+        let secrets: Vec<String> = self
+            .servers
+            .iter()
+            .flat_map(|decl| decl.auth.secret_values())
+            .collect();
         let detail = registry_outcome::failure_text(output).unwrap_or_else(|| {
             output
                 .strip_prefix(FAILED_PREFIX)
@@ -159,8 +164,8 @@ impl AgentMcpObserver {
         };
         let class = classify_call_error(error, &detail, auth_configured)?;
         Some(McpFailure {
-            server: outcome.server.clone(),
-            tool: outcome.tool.clone(),
+            server: scrub(&outcome.server, &secrets),
+            tool: scrub(&outcome.tool, &secrets),
             status: class.code(),
             hint: class.auth_hint.clone(),
             scrubbed_message: scrub(
