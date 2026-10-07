@@ -37,7 +37,8 @@ fn skill_md_frontmatter_resists_injection() {
 }
 
 /// `skill_md` renders the bytes the hand-assembled document it replaced did, so
-/// no authored or client-metadata install digests differently.
+/// no authored or client-metadata install digests differently, except that a
+/// category blank after trimming is left out rather than written empty.
 #[test]
 fn skill_md_is_byte_identical_to_the_hand_assembled_document() {
     fn assembled(name: &str, description: &str, category: Option<&str>, content: &str) -> String {
@@ -47,8 +48,10 @@ fn skill_md_is_byte_identical_to_the_hand_assembled_document() {
             one_line(name).trim(),
             one_line(description).trim()
         );
-        if let Some(category) = category {
-            frontmatter.push_str(&format!("category: {}\n", one_line(category).trim()));
+        if let Some(category) = category.map(|c| one_line(c).trim().to_string())
+            && !category.is_empty()
+        {
+            frontmatter.push_str(&format!("category: {category}\n"));
         }
         format!("---\n{frontmatter}---\n{content}\n")
     }
@@ -64,6 +67,7 @@ fn skill_md_is_byte_identical_to_the_hand_assembled_document() {
             "---\nnot: frontmatter",
         ),
         ("", "", Some(""), "trailing\n"),
+        ("Name", "A description", Some(" \r\n "), "body"),
         ("Ünïcode ✓", "émoji 🚀 desc", None, "body\r\nwith crlf\r\n"),
     ];
     for &(name, description, category, content) in cases {
