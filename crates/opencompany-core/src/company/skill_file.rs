@@ -70,13 +70,14 @@ pub fn parse_skill_md(slug: &str, src: &str) -> Result<SkillDoc> {
 
 /// Renders a [`SkillDoc`] back to `SKILL.md` source with
 /// [`tinyskills::render_flat`]: a `---`-fenced frontmatter block of `name`,
-/// `description`, then `category` and `version` when set, followed by the body
-/// verbatim.
+/// `description`, then `category` and `version` when non-empty, then the
+/// [`SkillDoc::extra_frontmatter`] lines, followed by the body verbatim.
 ///
 /// `parse → render → parse` is a fixed point on the doc, but the output is the
-/// canonical form rather than a copy of the original source: each scalar is
-/// collapsed to one trimmed line, so a value cannot inject a key or close the
-/// block early, and [`SkillDoc::extra_frontmatter`] is not written.
+/// canonical form rather than a copy of the original source: each scalar and
+/// extra line is collapsed to one trimmed line, so a value cannot inject a key
+/// or close the block early, and an extra line that would claim a recognised
+/// key is left out.
 pub fn render_skill_md(doc: &SkillDoc) -> String {
     tinyskills::render_flat(&doc.to_flat())
 }
