@@ -51,6 +51,10 @@ const BEARER_PREFIX: &str = "Bearer ";
 /// company id nor a server slug can contain it.
 const SERVER_ID_SEPARATOR: char = '/';
 
+/// The client name dynamic registration sends, shown on the authorization
+/// server's consent screen.
+const CLIENT_NAME: &str = "OpenCompany";
+
 /// The console's OAuth flow: one per host, holding the authorizations parked
 /// between `oauth/start` and the callback.
 ///
@@ -58,9 +62,13 @@ const SERVER_ID_SEPARATOR: char = '/';
 ///
 /// When the HTTP client cannot be built, which only a broken TLS setup does.
 pub fn console_flow() -> OAuthFlow {
+    named_flow().require_public_endpoints()
+}
+
+fn named_flow() -> OAuthFlow {
     OAuthFlow::new(None)
         .expect("oauth http client must build")
-        .require_public_endpoints()
+        .with_client_name(CLIENT_NAME)
 }
 
 /// The flow refreshes run through. Refreshing parks nothing, so one flow

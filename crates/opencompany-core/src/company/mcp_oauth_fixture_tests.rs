@@ -15,8 +15,8 @@ use serde_json::{Value, json};
 pub(crate) struct Seen {
     /// Every token-endpoint form, in order.
     pub(crate) token_forms: StdMutex<Vec<Vec<(String, String)>>>,
-    /// How many clients were registered.
-    pub(crate) registrations: StdMutex<usize>,
+    /// Every dynamic-registration body, in order.
+    pub(crate) registrations: StdMutex<Vec<Value>>,
 }
 
 /// The fixture's endpoints.
@@ -82,10 +82,10 @@ pub(crate) async fn spawn(registration: bool, token_reply: Value) -> AuthServer 
         )
         .route(
             "/register",
-            post(move || {
+            post(move |Json(body): Json<Value>| {
                 let seen = Arc::clone(&registered);
                 async move {
-                    *seen.registrations.lock().unwrap() += 1;
+                    seen.registrations.lock().unwrap().push(body);
                     Json(json!({ "client_id": "cid-1", "client_secret": "cs-1" }))
                 }
             }),

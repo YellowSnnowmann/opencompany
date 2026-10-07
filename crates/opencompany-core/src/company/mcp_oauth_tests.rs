@@ -24,7 +24,7 @@ fn oauth(token_endpoint: &str, expires_at: u64, refresh: Option<&str>) -> AuthMa
 }
 
 fn unguarded() -> OAuthFlow {
-    OAuthFlow::new(None).unwrap()
+    named_flow()
 }
 
 #[test]
@@ -192,6 +192,26 @@ async fn a_full_sign_in_returns_oauth_material_and_consumes_the_state() {
 }
 
 #[tokio::test]
+async fn registration_names_the_client_opencompany() {
+    let server = fixture::spawn(true, json!({ "access_token": "at" })).await;
+    let flow = unguarded();
+    begin(
+        &flow,
+        &server.mcp,
+        &CompanyId::new("acme"),
+        "notion",
+        "https://acme.example/oauth/mcp/callback",
+    )
+    .await
+    .expect("sign-in begins");
+
+    let bodies = server.seen.registrations.lock().unwrap().clone();
+    assert_eq!(bodies.len(), 1);
+    assert_eq!(bodies[0]["client_name"], json!("OpenCompany"));
+    assert_eq!(console_flow().client_name(), "OpenCompany");
+}
+
+#[tokio::test]
 async fn the_console_flow_refuses_a_loopback_authorization_server() {
     let server = fixture::spawn(true, json!({})).await;
     let error = begin(
@@ -207,7 +227,7 @@ async fn the_console_flow_refuses_a_loopback_authorization_server() {
         matches!(error, OpenCompanyError::InvalidRequest(_)),
         "{error:?}"
     );
-    assert_eq!(*server.seen.registrations.lock().unwrap(), 0);
+    assert!(server.seen.registrations.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
