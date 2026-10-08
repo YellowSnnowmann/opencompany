@@ -51,6 +51,8 @@ const BEARER_PREFIX: &str = "Bearer ";
 /// company id nor a server slug can contain it.
 const SERVER_ID_SEPARATOR: char = '/';
 
+const METADATA_FETCH_FAILED: &str = "fetching protected-resource metadata";
+
 /// The client name dynamic registration sends, shown on the authorization
 /// server's consent screen.
 const CLIENT_NAME: &str = "OpenCompany";
@@ -235,6 +237,11 @@ fn begin_error(server_name: &str, error: &tinymcp::Error) -> OpenCompanyError {
             OpenCompanyError::InvalidRequest(format!(
                 "MCP server `{server_name}` does not require authorization — no OAuth sign-in is needed."
             ))
+        }
+        tinymcp::Error::AuthDiscovery { detail, .. }
+            if detail.starts_with(METADATA_FETCH_FAILED) =>
+        {
+            OpenCompanyError::Harness(format!("oauth discovery failed: {error}"))
         }
         tinymcp::Error::AuthDiscovery { .. } => OpenCompanyError::InvalidRequest(format!(
             "MCP server `{server_name}` requires OAuth but does not advertise dynamic client \

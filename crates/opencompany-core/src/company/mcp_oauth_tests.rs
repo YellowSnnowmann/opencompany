@@ -249,6 +249,45 @@ async fn a_server_without_dynamic_registration_asks_for_a_static_token() {
 }
 
 #[tokio::test]
+async fn a_transient_metadata_failure_is_not_reported_as_missing_registration() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let challenge =
+        format!("Bearer resource_metadata=\"http://{addr}/.well-known/oauth-protected-resource\"");
+    let app = axum::Router::new()
+        .route(
+            "/mcp",
+            axum::routing::post(move || {
+                let challenge = challenge.clone();
+                async move {
+                    (
+                        axum::http::StatusCode::UNAUTHORIZED,
+                        [("www-authenticate", challenge)],
+                        "",
+                    )
+                }
+            }),
+        )
+        .route(
+            "/.well-known/oauth-protected-resource",
+            axum::routing::get(|| async { axum::http::StatusCode::SERVICE_UNAVAILABLE }),
+        );
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let error = begin(
+        &unguarded(),
+        &format!("http://{addr}/mcp"),
+        &CompanyId::new("acme"),
+        "slack",
+        "https://acme.example/oauth/mcp/callback",
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(error, OpenCompanyError::Harness(_)), "{error:?}");
+}
+
+#[tokio::test]
 async fn a_server_that_needs_no_sign_in_says_so() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
