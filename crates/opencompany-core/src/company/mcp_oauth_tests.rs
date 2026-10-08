@@ -335,3 +335,27 @@ async fn console_oauth_support_reads_dynamic_registration() {
     assert!(!supports_console_oauth(&without.mcp).await);
     assert!(supports_console_oauth("http://127.0.0.1:1/mcp").await);
 }
+
+const TINYMCP_FLOW: &str = include_str!(
+    "../../../../vendor/openhuman/vendor/tinymcp/crates/tinymcp/src/registry/oauth/flow.rs"
+);
+const TINYMCP_GUARD: &str = include_str!(
+    "../../../../vendor/openhuman/vendor/tinymcp/crates/tinymcp/src/registry/oauth/endpoint_guard.rs"
+);
+const TINYMCP_HTTP: &str = include_str!(
+    "../../../../vendor/openhuman/vendor/tinymcp/crates/tinymcp/src/transport/http/mod.rs"
+);
+
+#[test]
+fn the_error_prose_this_module_matches_is_still_tinymcps() {
+    for (source, prose) in [
+        (TINYMCP_FLOW, NO_AUTH_REQUIRED),
+        (TINYMCP_GUARD, ENDPOINT_REFUSED),
+        (TINYMCP_GUARD, ENDPOINT_HAS_NO_HOST),
+        (TINYMCP_GUARD, "invalid {what} url"),
+        (TINYMCP_HTTP, METADATA_FETCH_FAILED),
+    ] {
+        assert!(source.contains(prose), "tinymcp no longer says `{prose}`");
+    }
+    assert!("invalid {what} url".starts_with(INVALID_URL));
+}

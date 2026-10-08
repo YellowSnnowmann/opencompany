@@ -52,6 +52,10 @@ const BEARER_PREFIX: &str = "Bearer ";
 const SERVER_ID_SEPARATOR: char = '/';
 
 const METADATA_FETCH_FAILED: &str = "fetching protected-resource metadata";
+const NO_AUTH_REQUIRED: &str = "does not require authorization";
+const ENDPOINT_REFUSED: &str = "endpoint refused";
+const ENDPOINT_HAS_NO_HOST: &str = "endpoint has no host";
+const INVALID_URL: &str = "invalid ";
 
 /// The client name dynamic registration sends, shown on the authorization
 /// server's consent screen.
@@ -231,9 +235,7 @@ pub async fn begin(
 /// The operator-facing error for a sign-in that could not begin.
 fn begin_error(server_name: &str, error: &tinymcp::Error) -> OpenCompanyError {
     match error {
-        tinymcp::Error::MalformedResponse { detail }
-            if detail.contains("does not require authorization") =>
-        {
+        tinymcp::Error::MalformedResponse { detail } if detail.contains(NO_AUTH_REQUIRED) => {
             OpenCompanyError::InvalidRequest(format!(
                 "MCP server `{server_name}` does not require authorization — no OAuth sign-in is needed."
             ))
@@ -248,9 +250,9 @@ fn begin_error(server_name: &str, error: &tinymcp::Error) -> OpenCompanyError {
              registration — paste a static API token in its credential field instead."
         )),
         tinymcp::Error::MalformedResponse { detail }
-            if detail.contains("endpoint refused")
-                || detail.contains("endpoint has no host")
-                || detail.starts_with("invalid ") =>
+            if detail.contains(ENDPOINT_REFUSED)
+                || detail.contains(ENDPOINT_HAS_NO_HOST)
+                || detail.starts_with(INVALID_URL) =>
         {
             OpenCompanyError::InvalidRequest(detail.clone())
         }
