@@ -18,11 +18,10 @@ use crate::mcp::decl::families::{RegistryServerRow, server_family_brief};
 use crate::mcp::runtime::McpRuntime;
 use crate::ports::SecretStore;
 use crate::ports::types::CompanyId;
-use crate::runtime::tools::grants_cover_server;
 
 use super::{
-    OcMcpRegistryInstalledListTool, OcMcpRegistryScopedTool, capability_brief,
-    embed_servers_for_agent, registry_from_decls,
+    OcMcpRegistryInstalledListTool, OcMcpRegistryScopedTool, capability_brief, embed_servers,
+    granted_decls, registry_from_refs,
 };
 
 /// OpenHuman's own bridge tools over the servers attached to an agent's spec.
@@ -34,6 +33,7 @@ pub const DECLARED_BRIDGE_TOOLS: [&str; 2] = ["mcp_list_tools", "mcp_call_tool"]
 /// resolved from, borrowed, plus the two wiring decisions derived from them.
 pub struct AgentMcp<'a> {
     decls: &'a [McpServerDecl],
+    granted: Vec<&'a McpServerDecl>,
     agent: &'a str,
     grants: &'a [String],
     declared_wired: bool,
@@ -56,15 +56,13 @@ pub fn resolve_for_agent<'a>(
     grants: &'a [String],
     mcp_home: Option<PathBuf>,
 ) -> AgentMcp<'a> {
-    let granted: Vec<McpServerDecl> = decls
-        .iter()
-        .filter(|decl| decl.enabled && grants_cover_server(grants, &decl.name))
-        .cloned()
-        .collect();
-    let declared_wired = !granted.is_empty() && !registry_from_decls(&granted).is_empty();
+    let granted = granted_decls(decls, grants);
+    let declared_wired =
+        !granted.is_empty() && !registry_from_refs(granted.iter().copied()).is_empty();
     let registry_home = mcp_home.filter(|_| crate::company::grants_mcp_registry_explicit(grants));
     AgentMcp {
         decls,
+        granted,
         agent,
         grants,
         declared_wired,
@@ -89,7 +87,7 @@ impl AgentMcp<'_> {
         if !self.declared_wired {
             return Vec::new();
         }
-        embed_servers_for_agent(self.decls, self.agent, self.grants)
+        embed_servers(&self.granted, self.agent)
     }
 
     /// The OpenHuman-native bridge names the agent's tool scope must list for

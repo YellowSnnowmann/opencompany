@@ -41,12 +41,17 @@ pub use resolve::{AgentMcp, DECLARED_BRIDGE_TOOLS, resolve_for_agent};
 /// selects the HTTP transport (hosted-v1 boundary). Returns an empty registry
 /// when nothing survives.
 pub fn registry_from_decls(decls: &[McpServerDecl]) -> McpServerRegistry {
+    registry_from_refs(decls.iter())
+}
+
+pub(crate) fn registry_from_refs<'a>(
+    decls: impl Iterator<Item = &'a McpServerDecl>,
+) -> McpServerRegistry {
     let mut config = Config::default();
     // Do NOT inherit upstream's default gitbooks server.
     config.gitbooks.enabled = false;
     config.mcp_client.enabled = true;
     config.mcp_client.servers = decls
-        .iter()
         .filter(|decl| decl.enabled)
         .map(server_config)
         .collect();
@@ -103,9 +108,28 @@ pub fn embed_servers_for_agent(
     agent: &str,
     grants: &[String],
 ) -> Vec<openhuman_embed::McpServer> {
+    embed_servers(&granted_decls(decls, grants), agent)
+}
+
+/// The enabled declarations the grants cover.
+pub(crate) fn granted_decls<'a>(
+    decls: &'a [McpServerDecl],
+    grants: &[String],
+) -> Vec<&'a McpServerDecl> {
     decls
         .iter()
         .filter(|decl| decl.enabled && grants_cover_server(grants, &decl.name))
+        .collect()
+}
+
+/// [`embed_servers_for_agent`] over declarations already filtered to the
+/// grants.
+pub(crate) fn embed_servers(
+    granted: &[&McpServerDecl],
+    agent: &str,
+) -> Vec<openhuman_embed::McpServer> {
+    granted
+        .iter()
         .map(|decl| {
             // Deny outranks allow in the transport, so a server with an allow
             // list cannot re-admit a blocked tool.
