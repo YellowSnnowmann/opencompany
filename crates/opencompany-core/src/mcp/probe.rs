@@ -261,6 +261,16 @@ fn status_kind(code: u16, auth_configured: bool) -> FailureKind {
     }
 }
 
+/// [`status_kind`] for a call's failure, where the credential state of the
+/// server may be unknown. A 401 from a server whose credentials are not known
+/// says nothing about whether one is missing or refused.
+fn call_status_kind(code: u16, auth_configured: Option<bool>) -> FailureKind {
+    match auth_configured {
+        None if code == 401 => FailureKind::Unknown,
+        configured => status_kind(code, configured.unwrap_or(false)),
+    }
+}
+
 /// The HTTP status code embedded in an upstream `MCP HTTP {status} — …` message,
 /// if present.
 ///
@@ -308,7 +318,7 @@ fn text_looks_like_tls(lowered: &str) -> bool {
 pub fn classify_call_error(
     error: &tinymcp::McpCallError,
     detail: &str,
-    auth_configured: bool,
+    auth_configured: Option<bool>,
 ) -> Option<ProbeClass> {
     use tinymcp::tinymcp_bus::errors;
 
@@ -320,11 +330,11 @@ pub fn classify_call_error(
             if error.advertises_oauth {
                 FailureKind::OauthRequired
             } else {
-                status_kind(401, auth_configured)
+                call_status_kind(401, auth_configured)
             }
         }
         errors::HTTP => http_status_in(detail).map_or(FailureKind::Unknown, |code| {
-            status_kind(code, auth_configured)
+            call_status_kind(code, auth_configured)
         }),
         errors::TRANSPORT => {
             let lowered = detail.to_ascii_lowercase();

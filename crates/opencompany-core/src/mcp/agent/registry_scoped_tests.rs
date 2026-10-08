@@ -568,6 +568,7 @@ async fn a_failed_registry_call_reaches_the_observer_like_a_native_one() {
     assert_eq!(failures.len(), 1, "{failures:?}");
     assert_eq!(failures[0].server, INSTALL_A);
     assert_eq!(failures[0].tool, "echo");
-    assert_eq!(failures[0].status, "credential_required");
+    assert_eq!(failures[0].status, "error");
+    assert_eq!(failures[0].hint, None);
     assert_eq!(sink.drain(), failures);
 }

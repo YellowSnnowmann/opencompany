@@ -421,3 +421,21 @@ async fn a_credential_typed_as_the_server_or_tool_name_is_scrubbed() {
     assert!(!failures[0].tool.contains(TOKEN), "{}", failures[0].tool);
     assert!(!failures[0].scrubbed_message.contains(TOKEN));
 }
+
+#[tokio::test]
+async fn a_registry_install_401_is_not_called_a_missing_credential() {
+    let body = json!({
+        "result": "mcp unauthorized for `https://x.test/mcp` (HTTP 401)",
+        "is_error": true
+    });
+    let result = crate::mcp::agent::registry_outcome::attach_answer(
+        ToolResult::success(body.to_string()),
+        "install-id",
+        "search",
+    );
+    let decl = decl("http://127.0.0.1:1/mcp", AuthMaterial::None, &[]);
+    let failures = fixture(&decl).observer.observe(&[completed(&result)]).await;
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].hint, None);
+    assert_ne!(failures[0].status, "credential_required");
+}

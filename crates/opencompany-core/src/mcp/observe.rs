@@ -141,7 +141,7 @@ impl AgentMcpObserver {
     fn failure(&self, outcome: &McpCallOutcome, output: &str) -> Option<McpFailure> {
         let error = outcome.error.as_ref()?;
         let decl = self.servers.iter().find(|decl| decl.name == outcome.server);
-        let auth_configured = decl.is_some_and(|decl| decl.auth.is_configured());
+        let auth_configured = decl.map(|decl| decl.auth.is_configured());
         let secrets: Vec<String> = self
             .servers
             .iter()
