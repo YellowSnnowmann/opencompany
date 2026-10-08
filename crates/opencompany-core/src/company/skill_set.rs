@@ -97,6 +97,7 @@ pub fn bundle_root(source_dir: Option<&Path>) -> Option<PathBuf> {
 
 /// A company's effective skill set: the global baseline, the bundle under
 /// `source_dir`, and `library`, folded with `deltas`.
+#[cfg(test)]
 pub fn resolve_company(
     source_dir: Option<&Path>,
     library: &[SkillDoc],
@@ -106,7 +107,7 @@ pub fn resolve_company(
     skill_effective::resolve(&company_layers(root.as_deref(), library), deltas)
 }
 
-/// One agent's slice of [`resolve_company`], narrowed by its scope.
+/// One agent's effective skills, narrowed by its scope.
 pub fn resolve_company_for_agent(
     source_dir: Option<&Path>,
     library: &[SkillDoc],
