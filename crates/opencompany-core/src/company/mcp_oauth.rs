@@ -47,8 +47,8 @@ const ACCESS_TOKEN_KEY: &str = "Authorization";
 /// The scheme the flow prefixes the access token with.
 const BEARER_PREFIX: &str = "Bearer ";
 
-/// Separates the company from the server in a qualified server id. Neither a
-/// company id nor a server slug can contain it.
+/// Separates the company from the server in a qualified server id. The company
+/// half is escaped so it never contains it; the server half may.
 const SERVER_ID_SEPARATOR: char = '/';
 
 const METADATA_FETCH_FAILED: &str = "fetching protected-resource metadata";
@@ -98,14 +98,29 @@ pub fn callback_redirect_uri(base_url: &str) -> String {
 /// server, so the callback — which carries no console session — learns both
 /// from the `state` alone.
 pub fn server_id(company: &CompanyId, server_name: &str) -> String {
-    format!("{}{SERVER_ID_SEPARATOR}{server_name}", company.as_ref())
+    format!(
+        "{}{SERVER_ID_SEPARATOR}{server_name}",
+        escape_company(company.as_ref())
+    )
+}
+
+fn escape_company(company: &str) -> String {
+    company.replace('%', "%25").replace('/', "%2F")
+}
+
+fn unescape_company(company: &str) -> String {
+    company.replace("%2F", "/").replace("%25", "%")
 }
 
 /// The company and server a [`server_id`] names.
 pub fn split_server_id(server_id: &str) -> Option<(CompanyId, String)> {
-    let (company, server) = server_id.rsplit_once(SERVER_ID_SEPARATOR)?;
-    (!company.is_empty() && !server.is_empty())
-        .then(|| (CompanyId::new(company), server.to_string()))
+    let (company, server) = server_id.split_once(SERVER_ID_SEPARATOR)?;
+    (!company.is_empty() && !server.is_empty()).then(|| {
+        (
+            CompanyId::new(unescape_company(company)),
+            server.to_string(),
+        )
+    })
 }
 
 /// The flow's view of one server's stored [`AuthMaterial`].

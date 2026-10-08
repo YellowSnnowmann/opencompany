@@ -49,6 +49,25 @@ fn a_server_id_names_its_company_and_server() {
 }
 
 #[test]
+fn a_slash_in_either_half_survives_the_round_trip() {
+    for (company, server) in [
+        ("acme", "acme/docs"),
+        ("tenant/acme", "docs"),
+        ("tenant/acme", "a/b/c"),
+        ("100%/x", "docs"),
+        ("a%2Fb", "docs"),
+    ] {
+        let company = CompanyId::new(company);
+        let id = server_id(&company, server);
+        assert_eq!(
+            split_server_id(&id),
+            Some((company, server.to_string())),
+            "{id}"
+        );
+    }
+}
+
+#[test]
 fn oauth_material_secret_values_cover_every_token() {
     let material = AuthMaterial::OAuth {
         access_token: "at-secret".into(),
