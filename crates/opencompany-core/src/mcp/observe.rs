@@ -37,6 +37,38 @@ const FAILED_PREFIX: &str = "mcp_call_tool failed: ";
 #[derive(Clone, Default)]
 pub struct McpCallObserver {
     failures: Arc<Mutex<Vec<McpFailure>>>,
+    servers: Arc<Mutex<Option<Arc<ObservedServers>>>>,
+}
+
+/// What classifying and scrubbing a failure needs of the declared servers: who
+/// is configured, and every credential value to scrub. Held once per company
+/// observer, not per agent.
+#[derive(Debug, PartialEq, Eq)]
+struct ObservedServers {
+    configured: Vec<(String, bool)>,
+    secrets: Vec<String>,
+}
+
+impl ObservedServers {
+    fn of(decls: &[McpServerDecl]) -> Self {
+        Self {
+            configured: decls
+                .iter()
+                .map(|decl| (decl.name.clone(), decl.auth.is_configured()))
+                .collect(),
+            secrets: decls
+                .iter()
+                .flat_map(|decl| decl.auth.secret_values())
+                .collect(),
+        }
+    }
+
+    fn auth_configured(&self, server: &str) -> Option<bool> {
+        self.configured
+            .iter()
+            .find(|(name, _)| name == server)
+            .map(|(_, configured)| *configured)
+    }
 }
 
 impl McpCallObserver {
@@ -46,14 +78,27 @@ impl McpCallObserver {
         company: CompanyId,
         agent: impl Into<String>,
         meter: Option<Arc<dyn UsageMeter>>,
-        servers: Vec<McpServerDecl>,
+        servers: impl AsRef<[McpServerDecl]>,
     ) -> AgentMcpObserver {
         AgentMcpObserver {
             sink: self.clone(),
             company,
             agent: agent.into(),
             meter,
-            servers: servers.into(),
+            servers: self.share_servers(servers.as_ref()),
+        }
+    }
+
+    fn share_servers(&self, decls: &[McpServerDecl]) -> Arc<ObservedServers> {
+        let observed = ObservedServers::of(decls);
+        let mut shared = self.servers.lock().expect("mcp servers");
+        match shared.as_ref() {
+            Some(current) if **current == observed => Arc::clone(current),
+            _ => {
+                let fresh = Arc::new(observed);
+                *shared = Some(Arc::clone(&fresh));
+                fresh
+            }
         }
     }
 
@@ -72,6 +117,15 @@ impl McpCallObserver {
         std::mem::take(&mut *self.failures.lock().expect("mcp failures"))
     }
 
+    #[cfg(test)]
+    fn shared_servers_of(&self, agent: &AgentMcpObserver) -> bool {
+        self.servers
+            .lock()
+            .expect("mcp servers")
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, &agent.servers))
+    }
+
     /// How many failures are recorded.
     #[cfg(test)]
     pub fn queued(&self) -> usize {
@@ -86,13 +140,13 @@ pub struct AgentMcpObserver {
     company: CompanyId,
     agent: String,
     meter: Option<Arc<dyn UsageMeter>>,
-    servers: Arc<[McpServerDecl]>,
+    servers: Arc<ObservedServers>,
 }
 
 impl AgentMcpObserver {
     /// An observer that meters nothing and records into a list nobody reads.
     pub fn off() -> Self {
-        McpCallObserver::default().for_agent(CompanyId::new("unobserved"), "", None, Vec::new())
+        McpCallObserver::default().for_agent(CompanyId::new("unobserved"), "", None, [])
     }
 
     /// Meters the answered calls in `events` and records the failed ones,
@@ -140,13 +194,8 @@ impl AgentMcpObserver {
     /// scrubbed with every declared server's credentials, like the message.
     fn failure(&self, outcome: &McpCallOutcome, output: &str) -> Option<McpFailure> {
         let error = outcome.error.as_ref()?;
-        let decl = self.servers.iter().find(|decl| decl.name == outcome.server);
-        let auth_configured = decl.map(|decl| decl.auth.is_configured());
-        let secrets: Vec<String> = self
-            .servers
-            .iter()
-            .flat_map(|decl| decl.auth.secret_values())
-            .collect();
+        let auth_configured = self.servers.auth_configured(&outcome.server);
+        let secrets = &self.servers.secrets;
         let detail = registry_outcome::failure_text(output).unwrap_or_else(|| {
             output
                 .strip_prefix(FAILED_PREFIX)
@@ -164,14 +213,11 @@ impl AgentMcpObserver {
         };
         let class = classify_call_error(error, &detail, auth_configured)?;
         Some(McpFailure {
-            server: scrub(&outcome.server, &secrets),
-            tool: scrub(&outcome.tool, &secrets),
+            server: scrub(&outcome.server, secrets),
+            tool: scrub(&outcome.tool, secrets),
             status: class.code(),
             hint: class.auth_hint.clone(),
-            scrubbed_message: scrub(
-                &operator_message(&outcome.server, &class, &detail),
-                &secrets,
-            ),
+            scrubbed_message: scrub(&operator_message(&outcome.server, &class, &detail), secrets),
         })
     }
 }

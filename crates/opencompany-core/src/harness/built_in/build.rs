@@ -1216,7 +1216,7 @@ pub fn build_agent_with_model(
             company.clone(),
             manifest_agent.id.clone(),
             deps.meter.clone(),
-            deps.mcp_servers.clone(),
+            &deps.mcp_servers,
         ),
     })
 }

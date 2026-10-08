@@ -439,3 +439,19 @@ async fn a_registry_install_401_is_not_called_a_missing_credential() {
     assert_eq!(failures[0].hint, None);
     assert_ne!(failures[0].status, "credential_required");
 }
+
+#[test]
+fn agents_over_the_same_servers_share_one_snapshot_and_a_change_replaces_it() {
+    let one = decl("http://127.0.0.1:1/mcp", AuthMaterial::None, &[]);
+    let sink = McpCallObserver::default();
+    let first = sink.for_agent(CompanyId::new("acme"), "a", None, vec![one.clone()]);
+    let second = sink.for_agent(CompanyId::new("acme"), "b", None, vec![one.clone()]);
+    assert!(Arc::ptr_eq(&first.servers, &second.servers));
+
+    let mut changed = one;
+    changed.auth = AuthMaterial::Bearer(TOKEN.to_string());
+    let third = sink.for_agent(CompanyId::new("acme"), "c", None, vec![changed]);
+    assert!(!Arc::ptr_eq(&first.servers, &third.servers));
+    assert!(sink.shared_servers_of(&third));
+    assert!(!sink.shared_servers_of(&first));
+}
