@@ -111,3 +111,21 @@ async fn callback_for_unknown_company_stops_before_exchange() {
     assert!(String::from_utf8_lossy(&bytes).contains("Company not found"));
     assert!(server.seen.token_forms.lock().unwrap().is_empty());
 }
+
+#[test]
+fn an_exchange_that_lost_its_state_renders_expired_not_a_gateway_error() {
+    use crate::error::OpenCompanyError;
+    use crate::ports::types::CompanyId;
+
+    let company = CompanyId::new("acme");
+    let expired = OpenCompanyError::InvalidRequest("unknown or expired oauth state".into());
+    assert_eq!(
+        exchange_failure(&expired, &company, "notion").status(),
+        StatusCode::BAD_REQUEST
+    );
+    let failed = OpenCompanyError::Harness("token request failed: boom".into());
+    assert_eq!(
+        exchange_failure(&failed, &company, "notion").status(),
+        StatusCode::BAD_GATEWAY
+    );
+}

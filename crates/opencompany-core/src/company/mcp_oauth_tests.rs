@@ -319,11 +319,13 @@ async fn a_server_that_needs_no_sign_in_says_so() {
 }
 
 #[tokio::test]
-async fn completing_an_unknown_state_fails() {
+async fn completing_an_unknown_state_is_an_invalid_request() {
+    let error = complete(&unguarded(), "never-parked", "code")
+        .await
+        .unwrap_err();
     assert!(
-        complete(&unguarded(), "never-parked", "code")
-            .await
-            .is_err()
+        matches!(error, OpenCompanyError::InvalidRequest(_)),
+        "{error:?}"
     );
 }
 
@@ -354,6 +356,7 @@ fn the_error_prose_this_module_matches_is_still_tinymcps() {
         (TINYMCP_GUARD, ENDPOINT_HAS_NO_HOST),
         (TINYMCP_GUARD, "invalid {what} url"),
         (TINYMCP_HTTP, METADATA_FETCH_FAILED),
+        (TINYMCP_FLOW, UNKNOWN_STATE),
     ] {
         assert!(source.contains(prose), "tinymcp no longer says `{prose}`");
     }

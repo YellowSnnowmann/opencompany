@@ -56,6 +56,7 @@ const NO_AUTH_REQUIRED: &str = "does not require authorization";
 const ENDPOINT_REFUSED: &str = "endpoint refused";
 const ENDPOINT_HAS_NO_HOST: &str = "endpoint has no host";
 const INVALID_URL: &str = "invalid ";
+const UNKNOWN_STATE: &str = "unknown or expired oauth state";
 
 /// The client name dynamic registration sends, shown on the authorization
 /// server's consent screen.
@@ -264,12 +265,20 @@ fn begin_error(server_name: &str, error: &tinymcp::Error) -> OpenCompanyError {
 /// returns the [`AuthMaterial::OAuth`] the caller stores write-only.
 ///
 /// The parked authorization is consumed whether or not the exchange succeeds.
+/// A state that is unknown, expired or already used is
+/// [`OpenCompanyError::InvalidRequest`]; a failed exchange is
+/// [`OpenCompanyError::Harness`].
 pub async fn complete(flow: &OAuthFlow, state: &str, code: &str) -> Result<AuthMaterial> {
     let store = MaterialStore::new(None, AuthMaterial::None);
     let server = flow
         .complete(&store, state, code)
         .await
-        .map_err(|error| OpenCompanyError::Harness(format!("token request failed: {error}")))?;
+        .map_err(|error| match &error {
+            tinymcp::Error::MalformedResponse { detail } if detail == UNKNOWN_STATE => {
+                OpenCompanyError::InvalidRequest(detail.clone())
+            }
+            _ => OpenCompanyError::Harness(format!("token request failed: {error}")),
+        })?;
     let material = store.minted().ok_or_else(|| {
         OpenCompanyError::Harness("the token exchange returned no usable token".to_string())
     })?;

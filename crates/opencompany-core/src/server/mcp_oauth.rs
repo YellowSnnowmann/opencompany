@@ -76,11 +76,7 @@ async fn callback(State(state): State<AppState>, Query(query): Query<CallbackQue
         .as_deref()
         .and_then(mcp_oauth::split_server_id)
     else {
-        return failure_page(
-            StatusCode::BAD_REQUEST,
-            "Sign-in expired",
-            "This sign-in link is no longer valid (it may have already been used or expired). Start again from Connections.",
-        );
+        return expired_page();
     };
 
     // 4. Resolve the company the pending flow targets.
@@ -99,20 +95,7 @@ async fn callback(State(state): State<AppState>, Query(query): Query<CallbackQue
     // 5. Exchange the code for a token (PKCE verifier + client creds).
     let material = match mcp_oauth::complete(state.mcp_oauth(), cb_state, code).await {
         Ok(material) => material,
-        Err(err) => {
-            // The flow never echoes a secret in its error; scrub anyway as
-            // defence in depth.
-            let scrubbed = crate::redact::scrub(&err.to_string(), &[]);
-            log::warn!(
-                "[mcp-oauth] token exchange failed for company={} server={server_name}: {scrubbed}",
-                company_id.as_ref(),
-            );
-            return failure_page(
-                StatusCode::BAD_GATEWAY,
-                "Couldn't complete sign-in",
-                &format!("The token exchange failed: {scrubbed}"),
-            );
-        }
+        Err(err) => return exchange_failure(&err, &company_id, &server_name),
     };
 
     // 6. Store the token WRITE-ONLY under the per-server credential key.
@@ -149,6 +132,36 @@ async fn callback(State(state): State<AppState>, Query(query): Query<CallbackQue
     );
 
     success_page(&server_name)
+}
+
+fn exchange_failure(
+    err: &crate::error::OpenCompanyError,
+    company_id: &crate::ports::types::CompanyId,
+    server_name: &str,
+) -> Response {
+    if matches!(err, crate::error::OpenCompanyError::InvalidRequest(_)) {
+        return expired_page();
+    }
+    // The flow never echoes a secret in its error; scrub anyway as defence in
+    // depth.
+    let scrubbed = crate::redact::scrub(&err.to_string(), &[]);
+    log::warn!(
+        "[mcp-oauth] token exchange failed for company={} server={server_name}: {scrubbed}",
+        company_id.as_ref(),
+    );
+    failure_page(
+        StatusCode::BAD_GATEWAY,
+        "Couldn't complete sign-in",
+        &format!("The token exchange failed: {scrubbed}"),
+    )
+}
+
+fn expired_page() -> Response {
+    failure_page(
+        StatusCode::BAD_REQUEST,
+        "Sign-in expired",
+        "This sign-in link is no longer valid (it may have already been used or expired). Start again from Connections.",
+    )
 }
 
 /// Probe the server through the same auth-included registry the agent uses, and
