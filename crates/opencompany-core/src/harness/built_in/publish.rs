@@ -33,7 +33,7 @@
 //!
 //! Tools are built once per agent; the card varies per dispatch. So the tool
 //! cannot hold a task id or an artifact store. It pushes a [`PendingPublish`]
-//! onto the shared [`PendingPublishQueue`] — the [`McpFailureQueue`] pattern —
+//! onto the shared [`PendingPublishQueue`] — the [`McpCallObserver`] pattern —
 //! which the brain drains inside the completion path where it already holds the
 //! card, the responder and the store. One write site, and "the queue is empty"
 //! doubles as the detection signal the nudge reads.
@@ -81,7 +81,7 @@
 //!   cannot make the success message a liar, because the message describes what
 //!   was captured, not what is on disk now.
 //!
-//! [`McpFailureQueue`]: crate::harness::mcp_probe::McpFailureQueue
+//! [`McpCallObserver`]: crate::mcp::observe::McpCallObserver
 
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
@@ -312,7 +312,7 @@ fn cannot_publish_here(path: &str) -> String {
 }
 
 /// A shared, in-memory queue of staged publishes — the exact
-/// [`McpFailureQueue`](crate::harness::mcp_probe::McpFailureQueue) pattern.
+/// [`McpCallObserver`](crate::mcp::observe::McpCallObserver) pattern.
 ///
 /// Cheap to [`Clone`] (a shared handle); the tool built into the agent and the
 /// brain that drains it see the same queue because

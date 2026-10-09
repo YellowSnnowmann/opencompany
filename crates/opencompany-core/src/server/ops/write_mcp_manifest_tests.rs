@@ -340,7 +340,7 @@ async fn mcp_reachability_flags_a_server_no_agent_can_reach() {
 }
 
 /// Issue #568: a **disabled** server reaches nobody, however wide the grants.
-/// `registry_for_agent` filters on `decl.enabled && grants_cover_server(..)`, so
+/// `resolve_for_agent` filters on `decl.enabled && grants_cover_server(..)`, so
 /// an agent holding `mcp:docs` is handed no such tool while the server is off —
 /// reporting it as reachable would be the console/harness disagreement this
 /// feature exists to remove. Asserted on both readers: the mutating response

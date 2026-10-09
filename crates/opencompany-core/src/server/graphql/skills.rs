@@ -12,7 +12,7 @@ use async_graphql::{Context, ID, SimpleObject};
 
 use crate::AppState;
 use crate::company::runtime::CompanyRuntime;
-use crate::company::skill_effective::{self, EffectiveSkill};
+use crate::company::skill_effective::EffectiveSkill;
 use crate::company::skill_scope::{
     AgentSkillScope, SkillAgentScope, SkillScopeState, agents_for_skill,
 };
@@ -179,7 +179,7 @@ fn registry_docs(state: &AppState) -> async_graphql::Result<Arc<[SkillDoc]>> {
 }
 
 /// Resolves `Company.skills` from the company's effective set
-/// ([`skill_effective::resolve`]) — the same derivation the harness materializes
+/// ([`skill_effective::resolve`](crate::company::skill_effective::resolve)) — the same derivation the harness materializes
 /// for every agent, and the same one `GET …/skills` answers with.
 ///
 /// Disabled entries are reported rather than dropped: the console's switch needs
@@ -189,16 +189,12 @@ pub(crate) async fn resolve_company(
     runtime: &Arc<CompanyRuntime>,
 ) -> async_graphql::Result<Vec<SkillGql>> {
     let state = ctx.data::<AppState>()?;
-    let registry = registry_docs(state)?;
-
-    let mut deltas = runtime.skills().list(runtime.id()).await?;
-    deltas.extend(skill_effective::globals_skill_disables(
-        &runtime.globals_disable().await?,
-    ));
+    let set =
+        crate::company::skill_set::load_runtime_skill_set(runtime, registry_docs(state)?).await?;
 
     Ok(project(
-        &skill_effective::resolve(runtime.source_dir(), &registry, &deltas)?,
-        &registry,
+        &set.effective,
+        &set.library,
         &crate::server::ops::skills::scope::roster_scopes(runtime).await?,
     ))
 }

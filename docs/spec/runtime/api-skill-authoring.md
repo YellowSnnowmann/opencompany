@@ -50,10 +50,10 @@ form.
 
 ### Archive handling
 
-An archive is a list of paths and byte counts supplied by whoever built it. The
-shape is judged from the archive's directory **before** anything is
-decompressed, so a bomb is refused by arithmetic rather than by running out of
-memory:
+An archive is a list of paths and byte counts supplied by whoever built it.
+`tinyskills::read_skill_archive` reads it, and judges the shape from the
+archive's directory **before** anything is decompressed, so a bomb is refused by
+arithmetic rather than by running out of memory:
 
 - an entry-count ceiling (64);
 - the sum of the declared uncompressed sizes against 1 MiB;
@@ -61,9 +61,10 @@ memory:
 - symbolic links — how an archive reaches a path it never names;
 - an archive nested inside the archive.
 
-The one entry that is read is read through a bounded reader as well, behind
-whatever the archive reader itself does with a header that disagrees with its
-entry.
+Content is read through a bounded reader as well, behind whatever the archive
+reader itself does with a header that disagrees with its entry. A leading `./`
+on an entry path is accepted and dropped, and macOS bookkeeping (`__MACOSX/`,
+`.DS_Store`, `._*`) is ignored after the path checks.
 
 ### Bundled resource files are refused, not dropped
 
@@ -82,7 +83,7 @@ store is not added.
 
 The reader decides what the file is, the write plane's own 256 KiB ceiling
 bounds the assembled document, and the shared validator
-(`company::skill_validate`) and content scan (`company::skill_scan`) run last. A
+(`company::skill_validate`) and content scan (`tinyskills::scan_skill`) run last. A
 `block` verdict returns the report and writes nothing. There is deliberately no
 setting that silences a class of finding for a whole host — the override is a
 per-request flag on the one upload.

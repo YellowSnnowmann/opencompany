@@ -50,11 +50,11 @@ use serde_json::{Value, json};
 use crate::company::credentials::Credential;
 use crate::company::{Agent as ManifestAgent, Policy};
 use crate::harness::build::{MAX_TOOL_ITERATIONS, agent_workspace, build_agent};
-use crate::harness::mcp_probe::McpFailureQueue;
 use crate::harness::orchestrator::{DelegationQueue, WorkflowRunnerHandle};
 use crate::harness::policy::{ApprovalPolicy, ApprovalRequestQueue};
 use crate::harness::provider::{HostedProvider, HostedProviderConfig};
 use crate::harness::{CompanyAgent, HarnessDeps};
+use crate::mcp::observe::McpCallObserver;
 use crate::ports::types::CompanyId;
 use crate::runtime::delegation::ChatTarget;
 use crate::store::FsCompanyStore;
@@ -222,7 +222,7 @@ fn deps(model_url: String, dir: &std::path::Path) -> HarnessDeps {
         events: None,
         delegations: DelegationQueue::default(),
         workflow_runner: WorkflowRunnerHandle::default(),
-        mcp_failures: McpFailureQueue::default(),
+        mcp_failures: McpCallObserver::default(),
         pending_publishes: crate::harness::publish::PendingPublishQueue::default(),
         workflow_refs: crate::harness::workflow_refs::WorkflowRefQueue::default(),
         run_outputs: crate::harness::orchestrator::RunOutputCache::default(),

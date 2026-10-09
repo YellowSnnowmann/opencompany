@@ -67,6 +67,9 @@ pub mod ingest;
 /// `derived/` folder. The task board is registered here as a native ledger so
 /// one discovery surface reaches every one of them.
 pub mod ledger;
+/// MCP tool servers: declarations, per-tool policy, probing, the registry
+/// runtime, and what each agent reaches. See [`mcp`].
+pub mod mcp;
 /// A company's memory: OpenHuman's memory engine scoped to the company's root,
 /// one node per teammate (`docs/spec/runtime/memory-engine.md`).
 pub mod memory;
@@ -89,6 +92,8 @@ pub mod ports;
 /// backend HTTP clients. Ungated (no `openhuman` feature requirement) because
 /// `brain/` and `feedback/` need it and neither is feature-gated.
 pub mod product;
+/// Credential scrubbing for every surfaced message and tool body.
+pub mod redact;
 /// Machines that dial out to execute this host's work (the `runner` feature).
 #[cfg(feature = "runner")]
 pub mod runner;

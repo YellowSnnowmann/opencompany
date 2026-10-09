@@ -548,7 +548,7 @@ impl Tool for WebSearchTool {
             Ok(response) => response,
             Err(SearchDispatchError::BeforeDispatch(err)) => {
                 self.backend.calls.refund(company, now);
-                let detail = crate::harness::mcp_probe::scrub(&err.to_string(), &[token]);
+                let detail = crate::redact::scrub(&err.to_string(), &[token]);
                 return Ok(ToolResult::error(format!(
                     "Web search was blocked before dispatch: {detail}. Its daily search slot was \
                      refunded. Tell the operator search is unavailable — do not invent sources \
@@ -556,7 +556,7 @@ impl Tool for WebSearchTool {
                 )));
             }
             Err(SearchDispatchError::AfterDispatchAttempt(err)) => {
-                let detail = crate::harness::mcp_probe::scrub(&err.to_string(), &[token]);
+                let detail = crate::redact::scrub(&err.to_string(), &[token]);
                 return Ok(ToolResult::error(format!(
                     "Web search returned no usable results: {detail}. The request may have \
                      reached the backend, so its daily search slot is retained. Tell the \

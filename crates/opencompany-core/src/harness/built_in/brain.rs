@@ -1826,7 +1826,7 @@ impl HarnessBrain {
 
         // Issue #185: correlate this dispatch's journal trail to its card.
         //
-        // Ordering matters. Any MCP failures the turn queued are drained FIRST,
+        // Ordering matters. Any MCP failures the turn recorded are drained FIRST,
         // tagged with this task, so they land on the task's own timeline. Before
         // this they were left in the queue for whichever operator turn drained
         // next — which both mis-attributed them to an unrelated chat bubble and
@@ -2668,7 +2668,7 @@ impl HarnessBrain {
         }
     }
 
-    /// Drains the MCP failure queue **onto the operator bubble's step timeline**
+    /// Drains the company's MCP call failures **onto the operator bubble's step timeline**
     /// as error steps (the Activity-trace re-skin of the error-hardening cell's
     /// original fallback bubble), and journals a scrubbed
     /// [`CompanyEvent::McpCallFailed`] audit event per failure when the event log
@@ -2676,9 +2676,8 @@ impl HarnessBrain {
     ///
     /// One surface, one renderer, one scrub discipline: a silently-failed MCP
     /// call shows up as a red step in the same timeline as every other tool call
-    /// instead of a separate warning bubble. Every string was already scrubbed at
-    /// the source (`OcMcpCallTool`), so `scrubbed_message` is safe to show and to
-    /// persist.
+    /// instead of a separate warning bubble. Every string is scrubbed before it
+    /// is recorded, so `scrubbed_message` is safe to show and to persist.
     ///
     /// `task_id` is the dispatched card the failing turn belonged to, when the
     /// drain runs inside a [`CompanyEvent::TaskDispatched`] cycle (issue #185).

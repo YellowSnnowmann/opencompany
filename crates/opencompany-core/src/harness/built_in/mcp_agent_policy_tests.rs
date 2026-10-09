@@ -15,7 +15,7 @@ use super::built_in_test_fixtures::*;
 use super::*;
 
 use crate::company::mcp::{AuthMaterial, McpSource};
-use crate::company::mcp_policy::{
+use crate::mcp::policy::{
     AgentToolPolicies, ApprovalMode, McpToolInventory, McpToolPolicies, ToolPolicy, ToolTier,
 };
 
@@ -88,8 +88,7 @@ fn server_with_a_writer_rule() -> McpServerDecl {
 /// What `AgentSpec::mcp` will carry, read back the only way the type allows: its
 /// redacting `Debug`, which prints `disallowed_tools` verbatim.
 fn attachment(servers: &[McpServerDecl], agent: &str) -> String {
-    let attached =
-        crate::harness::mcp::embed_servers_for_agent(servers, agent, &grants(&["mcp:*"]));
+    let attached = crate::mcp::agent::embed_servers_for_agent(servers, agent, &grants(&["mcp:*"]));
     assert_eq!(attached.len(), 1);
     format!("{attached:?}")
 }
@@ -139,21 +138,6 @@ fn an_upgraded_company_builds_the_same_attachment() {
             "`{agent}` must get the company deny list, in order: {debug}"
         );
     }
-}
-
-/// The bridge tool's own set is built for one teammate, so it cannot answer for
-/// another.
-#[test]
-fn the_bridge_tools_policy_set_is_built_for_one_teammate() {
-    let servers = vec![server_with_a_writer_rule()];
-    let reach = grants(&["mcp:*"]);
-
-    let writer = crate::harness::mcp::granted_policies(&servers, "writer", &reach);
-    let engineer = crate::harness::mcp::granted_policies(&servers, "engineer", &reach);
-
-    assert!(writer.is_blocked("notion", "search_pages"));
-    assert!(!engineer.is_blocked("notion", "search_pages"));
-    assert!(!writer.is_blocked("notion", "get_page"));
 }
 
 /// The gate's read set follows the per-agent mode, and an episode seat resolves
@@ -262,9 +246,9 @@ fn a_hive_agents_prompt_names_no_server_it_cannot_call() {
     );
 
     let writer_brief =
-        crate::company::mcp_families::server_family_brief(&servers, &[], &reach, "writer");
+        crate::mcp::decl::families::server_family_brief(&servers, &[], &reach, "writer");
     let engineer_brief =
-        crate::company::mcp_families::server_family_brief(&servers, &[], &reach, "engineer");
+        crate::mcp::decl::families::server_family_brief(&servers, &[], &reach, "engineer");
 
     assert!(writer_brief.contains("`notion`"), "{writer_brief}");
     assert!(
@@ -305,7 +289,7 @@ fn the_server_family_brief_never_names_a_remote_mcp_tool() {
     let servers = vec![refused];
 
     for agent in ["writer", "engineer"] {
-        let brief = crate::company::mcp_families::server_family_brief(
+        let brief = crate::mcp::decl::families::server_family_brief(
             &servers,
             &[],
             &grants(&["mcp:notion"]),
@@ -378,7 +362,7 @@ async fn a_registry_install_blocked_for_one_agent_refuses_through_the_scoped_too
     crate::ports::SecretStore::set(
         secrets.as_ref(),
         &company,
-        &crate::company::mcp_policy::registry_tool_policies_key("notion-install"),
+        &crate::mcp::policy::registry_tool_policies_key("notion-install"),
         crate::ports::types::SecretValue(serde_json::to_string(&policies).expect("serializes")),
     )
     .await
@@ -388,7 +372,7 @@ async fn a_registry_install_blocked_for_one_agent_refuses_through_the_scoped_too
     let refusals: Vec<(&str, bool)> = {
         let mut out = Vec::new();
         for agent in ["writer", "engineer"] {
-            let tool = crate::harness::mcp::OcMcpRegistryScopedTool::new(
+            let tool = crate::mcp::agent::OcMcpRegistryScopedTool::new(
                 Box::new(NeverDials),
                 agent.to_string(),
                 grants(&["mcp_registry"]),

@@ -2,7 +2,7 @@
 //! `mcp` feature.
 //!
 //! Everything here is a thin adapter: it resolves the company's
-//! [`McpRuntime`](crate::harness::mcp::McpRuntime), calls one of its wrappers,
+//! [`McpRuntime`](crate::mcp::runtime::McpRuntime), calls one of its wrappers,
 //! and hands the result to a projection from the parent module. The rules worth
 //! testing (endpoint reconciliation, row naming, status mapping, catalogue
 //! projection, the stdio refusal) all live in the parent and compile without
@@ -32,11 +32,11 @@ use tinymcp::registry::curation::OFFICIAL_SERVERS;
 
 use crate::company::mcp::load_runtime_index;
 use crate::company::mcp::{McpHealth, stdio_install_refusal};
-use crate::company::mcp_endpoint::normalize_endpoint;
-use crate::company::mcp_server_info::{self, fetch_icon};
 use crate::company::runtime::CompanyRuntime;
 use crate::error::OpenCompanyError;
-use crate::harness::mcp::McpRuntime;
+use crate::mcp::decl::endpoint::normalize_endpoint;
+use crate::mcp::decl::server_info::{self as mcp_server_info, fetch_icon};
+use crate::mcp::runtime::McpRuntime;
 use crate::ports::now_millis;
 use crate::server::error::ApiError;
 use crate::server::ops::mcp::{
@@ -634,7 +634,7 @@ pub(in crate::server::ops) async fn remove_install(
 // Per-tool permissions for a directory install
 // ---------------------------------------------------------------------------
 
-use crate::company::mcp_policy;
+use crate::mcp::policy as mcp_policy;
 use crate::server::ops::mcp_tool_policy::{
     AgentScope, PutToolPolicy, apply_tool_policy_patch, policy_unreadable, require_roster_agent,
     tool_policy_dto,

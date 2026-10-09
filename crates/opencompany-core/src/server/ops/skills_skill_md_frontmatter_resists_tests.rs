@@ -7,6 +7,7 @@ use super::*;
 // would read as a dependency the module does not have.
 use super::vet::MAX_SKILL_DOC_BYTES;
 
+use crate::company::skill_effective;
 use crate::company::skill_validate::MAX_SLUG_CHARS;
 use crate::ports::types::CompanyId;
 
@@ -35,10 +36,53 @@ fn skill_md_frontmatter_resists_injection() {
     );
 }
 
+/// `skill_md` renders the bytes the hand-assembled document it replaced did, so
+/// no authored or client-metadata install digests differently, except that a
+/// category blank after trimming is left out rather than written empty.
+#[test]
+fn skill_md_is_byte_identical_to_the_hand_assembled_document() {
+    fn assembled(name: &str, description: &str, category: Option<&str>, content: &str) -> String {
+        let one_line = |s: &str| s.replace(['\n', '\r'], " ");
+        let mut frontmatter = format!(
+            "name: {}\ndescription: {}\n",
+            one_line(name).trim(),
+            one_line(description).trim()
+        );
+        if let Some(category) = category.map(|c| one_line(c).trim().to_string())
+            && !category.is_empty()
+        {
+            frontmatter.push_str(&format!("category: {category}\n"));
+        }
+        format!("---\n{frontmatter}---\n{content}\n")
+    }
+
+    let cases: &[(&str, &str, Option<&str>, &str)] = &[
+        ("Name", "A description", None, "body"),
+        ("Name", "A description", Some("Ops"), "# Heading\n\nText"),
+        ("  padded  ", "  spaced\r\n out ", Some("  cat \n"), ""),
+        (
+            "Evil\n---\ninjected: true",
+            "ratio 3:1",
+            Some("a\rb"),
+            "---\nnot: frontmatter",
+        ),
+        ("", "", Some(""), "trailing\n"),
+        ("Name", "A description", Some(" \r\n "), "body"),
+        ("Ünïcode ✓", "émoji 🚀 desc", None, "body\r\nwith crlf\r\n"),
+    ];
+    for &(name, description, category, content) in cases {
+        assert_eq!(
+            skill_md(name, description, category, content),
+            assembled(name, description, category, content),
+            "{name:?} / {description:?} / {category:?} / {content:?}"
+        );
+    }
+}
+
 /// The projection every `GET …/skills` row goes through, over the same
 /// resolution the harness materializes.
 fn list(source_dir: Option<&FsPath>, deltas: &[SkillState]) -> Vec<InstalledSkill> {
-    skill_effective::resolve(source_dir, &[], deltas)
+    crate::company::skill_set::resolve_company(source_dir, &[], deltas)
         .expect("resolves")
         .iter()
         .map(|skill| InstalledSkill::from_effective(skill, &[]))
@@ -168,7 +212,7 @@ fn the_list_unions_bundles_with_deltas() {
 fn a_malformed_company_bundle_surfaces_as_an_error() {
     let tmp = tempfile::tempdir().unwrap();
     write_bundle(tmp.path(), "broken", "no frontmatter here\n");
-    assert!(skill_effective::resolve(Some(tmp.path()), &[], &[]).is_err());
+    assert!(crate::company::skill_set::resolve_company(Some(tmp.path()), &[], &[]).is_err());
 }
 
 /// The REST list and the GraphQL resolver project the same resolution, so
@@ -203,7 +247,8 @@ fn the_rest_list_and_the_graphql_resolver_agree() {
         },
     ];
 
-    let effective = skill_effective::resolve(Some(tmp.path()), &[], &deltas).expect("resolves");
+    let effective = crate::company::skill_set::resolve_company(Some(tmp.path()), &[], &deltas)
+        .expect("resolves");
     let rest: Vec<InstalledSkill> = effective
         .iter()
         .map(|skill| InstalledSkill::from_effective(skill, &[]))
@@ -233,17 +278,33 @@ fn the_rest_list_and_the_graphql_resolver_agree() {
 
 /// The test the bug needed: what the console lists and what the harness
 /// writes into an agent's skill tree are the same set.
+///
+/// Every reader is driven through the loader it uses in production: the REST
+/// list, the GraphQL projection, the teammate picker and the document reader
+/// through `load_skill_set`, the harness through `load_skill_deltas` and
+/// `materialize`. A disable arrives both as a stored delta and through
+/// `[globals].disable`, so neither path can drop one the other keeps.
 #[cfg(feature = "openhuman")]
-#[test]
-fn the_rest_list_and_the_harness_effective_set_agree() {
+#[tokio::test]
+async fn the_rest_list_and_the_harness_effective_set_agree() {
+    use crate::company::skill_set::{self, SkillOwner};
+
     let tmp = tempfile::tempdir().unwrap();
     let ws = tempfile::tempdir().unwrap();
+    let store_root = tempfile::tempdir().unwrap();
     write_bundle(
         tmp.path(),
         "onboard",
         "---\nname: Onboard\ndescription: Get set up\n---\n# Onboard\n",
     );
-    let deltas = vec![
+    write_bundle(
+        tmp.path(),
+        "retired",
+        "---\nname: Retired\ndescription: Old\n---\n# Retired\n",
+    );
+    let store = crate::store::FsOps::new(store_root.path());
+    let company = CompanyId::new("agree");
+    for delta in [
         SkillState {
             slug: global_slug(),
             enabled: false,
@@ -262,8 +323,18 @@ fn the_rest_list_and_the_harness_effective_set_agree() {
             install: None,
             updated_at_millis: None,
         },
-    ];
+    ] {
+        crate::ports::skills_state::SkillStateStore::set(&store, &company, &delta)
+            .await
+            .unwrap();
+    }
+    let owner = SkillOwner { company: &company };
+    let disable = vec!["skill:retired".to_string()];
+    let bundle_root = skill_set::bundle_root(Some(tmp.path()));
 
+    let deltas = skill_set::load_skill_deltas(Some(&store), owner, &disable)
+        .await
+        .unwrap();
     crate::harness::skills::EffectiveSkills::materialize(
         ws.path().to_path_buf(),
         Some(tmp.path()),
@@ -273,7 +344,6 @@ fn the_rest_list_and_the_harness_effective_set_agree() {
         None,
     )
     .expect("materializes");
-
     let mut materialized: Vec<String> = std::fs::read_dir(ws.path().join("skills"))
         .expect("skill tree")
         .flatten()
@@ -281,29 +351,76 @@ fn the_rest_list_and_the_harness_effective_set_agree() {
         .collect();
     materialized.sort();
 
-    let mut listed: Vec<String> = list(Some(tmp.path()), &deltas)
-        .into_iter()
-        .filter(|row| row.enabled)
-        .map(|row| row.id)
-        .collect();
-    listed.sort();
+    let set = skill_set::load_skill_set(
+        &store,
+        owner,
+        &disable,
+        bundle_root.as_deref(),
+        Arc::from([]),
+    )
+    .await
+    .unwrap();
+    assert_eq!(set.deltas, deltas, "both loaders fold the same deltas");
+
+    let enabled = |slugs: Vec<(String, bool)>| {
+        let mut out: Vec<String> = slugs
+            .into_iter()
+            .filter(|(_, on)| *on)
+            .map(|(slug, _)| slug)
+            .collect();
+        out.sort();
+        out
+    };
+    let rest = enabled(
+        set.effective
+            .iter()
+            .map(|skill| InstalledSkill::from_effective(skill, &set.library))
+            .map(|row| (row.id, row.enabled))
+            .collect(),
+    );
+    let gql = enabled(
+        crate::server::graphql::skills::project(&set.effective, &set.library, &[])
+            .into_iter()
+            .map(|row| (row.id.0, row.enabled))
+            .collect(),
+    );
+    let picker = enabled(
+        set.effective
+            .iter()
+            .map(|skill| (skill.slug.clone(), skill.enabled))
+            .collect(),
+    );
+    let readable = enabled(
+        set.effective
+            .iter()
+            .map(|skill| (skill.slug.clone(), skill.enabled && skill.content.is_some()))
+            .collect(),
+    );
 
     assert_eq!(
-        listed, materialized,
+        rest, materialized,
         "the console's enabled rows are exactly the skills the agents read"
     );
+    assert_eq!(gql, rest, "GraphQL reports the set REST does");
+    assert_eq!(
+        picker, rest,
+        "the teammate picker offers the set REST lists"
+    );
+    assert_eq!(readable, rest, "every enabled row has a document to read");
     assert!(
         !materialized.contains(&global_slug()),
         "the disabled global really is withheld from the agents"
     );
-    // Pinned against the baseline itself, so an agreement of two empty
-    // halves cannot pass for agreement.
+    assert!(
+        !materialized.contains(&"retired".to_string()),
+        "a `[globals].disable` entry is withheld from the agents"
+    );
     for doc in crate::globals::skills() {
         if doc.slug == global_slug() {
             continue;
         }
         assert!(
-            listed.contains(&doc.slug),
+            rest.contains(&doc.slug),
             "the console lists the global `{}` the agents read",
             doc.slug
         );

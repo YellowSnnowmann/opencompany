@@ -25,7 +25,7 @@ fn non_empty_trims_and_rejects_blank() {
 
 // Integration-style coverage of the unauthenticated callback route's guard
 // branches, driven through a real axum app (mirrors
-// `mcp_probe::oauth_token_never_leaks_into_probed_health`). These are the
+// `mcp::probe::oauth_token_never_leaks_into_probed_health`). These are the
 // security-relevant early exits: none may exchange a code or reach a company.
 use crate::AppConfig;
 use axum::body::Body;
@@ -75,30 +75,30 @@ async fn callback_with_unknown_state_is_expired() {
 
 #[tokio::test]
 async fn callback_for_unknown_company_stops_before_exchange() {
-    use crate::company::mcp_oauth::PendingOAuth;
+    use crate::company::mcp_oauth::{begin, fixture};
     use crate::ports::types::CompanyId;
 
-    let state = AppState::new(AppConfig::default());
-    // Park a flow pointing at a company the registry doesn't hold, then drive
-    // the callback: it must resolve the parked state, find no company, and
-    // return before ever attempting a token exchange.
-    state.park_oauth(
-        "s-1".into(),
-        PendingOAuth {
-            company_id: CompanyId::new("ghost"),
-            server_name: "notion".into(),
-            code_verifier: "v".into(),
-            client_id: "cid".into(),
-            client_secret: None,
-            token_endpoint: "https://as.example/token".into(),
-            redirect_uri: "https://acme.example/oauth/mcp/callback".into(),
-        },
-    );
+    // Park a sign-in for a company the registry doesn't hold, then drive the
+    // callback: it must resolve the parked state, find no company, and return
+    // before ever attempting a token exchange.
+    let server = fixture::spawn(true, serde_json::json!({ "access_token": "at" })).await;
+    let state = AppState::new(AppConfig::default())
+        .with_mcp_oauth(tinymcp::registry::oauth::OAuthFlow::new(None).unwrap());
+    let url = begin(
+        state.mcp_oauth(),
+        &server.mcp,
+        &CompanyId::new("ghost"),
+        "notion",
+        "https://acme.example/oauth/mcp/callback",
+    )
+    .await
+    .expect("sign-in begins");
+    let cb_state = fixture::state_of(&url);
     let app = router().with_state(state);
     let resp = app
         .oneshot(
             Request::builder()
-                .uri("/oauth/mcp/callback?code=abc&state=s-1")
+                .uri(format!("/oauth/mcp/callback?code=abc&state={cb_state}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -109,4 +109,23 @@ async fn callback_for_unknown_company_stops_before_exchange() {
         .await
         .unwrap();
     assert!(String::from_utf8_lossy(&bytes).contains("Company not found"));
+    assert!(server.seen.token_forms.lock().unwrap().is_empty());
+}
+
+#[test]
+fn an_exchange_that_lost_its_state_renders_expired_not_a_gateway_error() {
+    use crate::error::OpenCompanyError;
+    use crate::ports::types::CompanyId;
+
+    let company = CompanyId::new("acme");
+    let expired = OpenCompanyError::InvalidRequest("unknown or expired oauth state".into());
+    assert_eq!(
+        exchange_failure(&expired, &company, "notion").status(),
+        StatusCode::BAD_REQUEST
+    );
+    let failed = OpenCompanyError::Harness("token request failed: boom".into());
+    assert_eq!(
+        exchange_failure(&failed, &company, "notion").status(),
+        StatusCode::BAD_GATEWAY
+    );
 }

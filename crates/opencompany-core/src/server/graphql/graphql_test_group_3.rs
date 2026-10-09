@@ -98,7 +98,9 @@ async fn skills_and_workflows_resolve_from_source_dir() {
         .unwrap();
     let state = AppState::new(AppConfig::default())
         .with_home(home.to_path_buf())
-        .with_skills_root(skills_root);
+        .with_skill_library(std::sync::Arc::new(
+            crate::company::skill_library::DirLibrary::explicit(skills_root),
+        ));
     state.registry().insert(id, Arc::new(runtime));
     crate::server::test_support::seed_fixed_admin(&state, "acme").await;
 
@@ -222,7 +224,9 @@ async fn company_skills_project_the_pinned_snapshot_of_a_registry_install() {
 
     let state = AppState::new(AppConfig::default())
         .with_home(home.clone())
-        .with_skills_root(skills_root);
+        .with_skill_library(std::sync::Arc::new(
+            crate::company::skill_library::DirLibrary::explicit(skills_root),
+        ));
     state.registry().insert(id, Arc::new(runtime));
     crate::server::test_support::seed_fixed_admin(&state, "acme").await;
 

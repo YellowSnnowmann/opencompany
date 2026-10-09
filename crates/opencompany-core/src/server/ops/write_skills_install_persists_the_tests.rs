@@ -148,7 +148,9 @@ async fn skills_install_500s_when_the_configured_library_cannot_load() {
 
     let state = state_with_company(home_dir.path())
         .await
-        .with_skills_root(&broken_root);
+        .with_skill_library(std::sync::Arc::new(
+            crate::company::skill_library::DirLibrary::explicit(&broken_root),
+        ));
 
     // The state itself reports the load failure rather than an empty registry.
     assert!(

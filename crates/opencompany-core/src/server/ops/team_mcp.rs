@@ -16,9 +16,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::AppState;
 use crate::company::mcp::{McpServerDecl, resolve_effective};
-use crate::company::mcp_policy;
 use crate::company::runtime::CompanyRuntime;
 use crate::error::OpenCompanyError;
+use crate::mcp::policy as mcp_policy;
 use crate::runtime::tools::grants_cover_server;
 use crate::server::error::ApiError;
 use crate::server::ops::mcp::manifest_servers;
@@ -135,7 +135,7 @@ async fn read_permissions(
 
     let mut servers = Vec::with_capacity(decls.len());
     for decl in &decls {
-        // Reach, exactly as `registry_for_agent` decides it.
+        // Reach, exactly as `resolve_for_agent` decides it.
         let reached = decl.enabled && grants_cover_server(&grants, &decl.name);
         let stored = mcp_policy::load_tool_policies_strict(
             runtime.id(),

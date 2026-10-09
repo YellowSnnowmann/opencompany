@@ -126,7 +126,13 @@ fn no_configured_mcp_server_wires_no_server_backed_mcp_tool() {
         "this test's premise is a company with no configured server"
     );
     assert!(
-        crate::harness::mcp::registry_for_agent(&deps.mcp_servers, &["*".to_string()]).is_none(),
+        !crate::mcp::agent::resolve_for_agent(
+            &deps.mcp_servers,
+            "desk",
+            &["*".to_string()],
+            deps.mcp_home.clone(),
+        )
+        .declared_wired(),
         "no configured server must yield no registry, even under `*`"
     );
 
@@ -385,4 +391,89 @@ fn a_company_agent_config_seeds_no_openhuman_docs_server() {
             .iter()
             .all(|server| server.name != "gitbooks")
     );
+}
+
+#[cfg(feature = "mcp")]
+fn declared_server(enabled: bool) -> crate::company::mcp::McpServerDecl {
+    crate::company::mcp::McpServerDecl {
+        name: "notes".to_string(),
+        endpoint: "https://mcp.example.test/notes".to_string(),
+        description: None,
+        allowed_tools: Vec::new(),
+        disallowed_tools: Vec::new(),
+        read_only_tools: Vec::new(),
+        timeout_secs: 30,
+        enabled,
+        source: crate::company::mcp::McpSource::Runtime,
+        auth: crate::company::mcp::AuthMaterial::None,
+        tool_policies: Default::default(),
+        tool_inventory: Default::default(),
+    }
+}
+
+#[cfg(feature = "mcp")]
+fn native_names_with(
+    servers: Vec<crate::company::mcp::McpServerDecl>,
+    grants: &[&str],
+) -> Vec<String> {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut deps = pin_deps(dir.path().to_path_buf());
+    deps.mcp_servers = servers;
+    let grants: Vec<String> = grants.iter().map(|g| g.to_string()).collect();
+    let blueprint = build_agent(
+        &CompanyId::new("acme"),
+        "Acme",
+        &manifest_agent("Desk Lead", None),
+        std::sync::Arc::new(ApprovalPolicy::new(&Policy::default(), None)),
+        &deps,
+        &grants,
+        &[],
+        &[],
+        None,
+        false,
+    )
+    .expect("agent builds");
+    assert!(
+        !blueprint
+            .tool_names()
+            .iter()
+            .any(|name| name == "mcp_list_tools" || name == "mcp_call_tool"),
+        "the bridge names are never belt tools: {:?}",
+        blueprint.tool_names()
+    );
+    blueprint.native_tool_names
+}
+
+#[cfg(feature = "mcp")]
+#[test]
+fn the_bridge_names_are_scoped_only_for_an_agent_reaching_a_declared_server() {
+    let bridges = ["mcp_list_tools".to_string(), "mcp_call_tool".to_string()];
+
+    let reached = native_names_with(vec![declared_server(true)], &["file_read", "mcp:notes"]);
+    assert!(reached.ends_with(&bridges), "{reached:?}");
+
+    for (label, names) in [
+        (
+            "no grant",
+            native_names_with(vec![declared_server(true)], &["file_read"]),
+        ),
+        (
+            "wildcard only",
+            native_names_with(vec![declared_server(true)], &["*"]),
+        ),
+        (
+            "other server",
+            native_names_with(vec![declared_server(true)], &["mcp:crm"]),
+        ),
+        (
+            "disabled",
+            native_names_with(vec![declared_server(false)], &["mcp:*"]),
+        ),
+        ("no server", native_names_with(Vec::new(), &["mcp:*"])),
+    ] {
+        assert!(
+            !names.iter().any(|name| bridges.contains(name)),
+            "`{label}` must not scope the bridge tools: {names:?}"
+        );
+    }
 }

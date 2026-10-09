@@ -1,11 +1,13 @@
 //! SKILL.md documents: `skills/<slug>/SKILL.md` (repo-level and per-company).
 //!
 //! A skill is a Markdown file with a small `---`-fenced frontmatter block
-//! carrying `name`, `description`, and an optional `category`. The frontmatter
-//! is hand-parsed — no serde_yaml dependency — and the Markdown body is
-//! preserved verbatim so WS4 can feed it to OpenHuman's skill parser unchanged.
+//! carrying `name`, `description`, and an optional `category` and `version`.
+//! The frontmatter is read by [`tinyskills::parse_flat`], line by line rather
+//! than as YAML, and the Markdown body is preserved verbatim.
 
 use std::path::{Path, PathBuf};
+
+use tinyskills::{FlatError, FlatSkill};
 
 use crate::error::{OpenCompanyError, Result};
 
@@ -43,104 +45,80 @@ pub struct SkillDoc {
 /// Parses one SKILL.md document for the given `slug` (its directory name).
 ///
 /// The frontmatter must be a `---`-fenced block of `key: value` lines at the
-/// very top; `name` and `description` are required, `category` is optional, and
-/// any other keys are tolerated. The body after the closing fence is kept
-/// verbatim.
+/// very top; `name` and `description` are required, `category` and `version`
+/// are optional, and any other keys are kept in
+/// [`SkillDoc::extra_frontmatter`]. The body after the closing fence is kept
+/// verbatim. The parsing is [`tinyskills::parse_flat`]'s; the errors name the
+/// slug.
 pub fn parse_skill_md(slug: &str, src: &str) -> Result<SkillDoc> {
     let path = PathBuf::from(format!("{slug}/SKILL.md"));
-
-    let (frontmatter, body) =
-        split_frontmatter(src).ok_or_else(|| OpenCompanyError::DataParse {
-            path: path.clone(),
+    match tinyskills::parse_flat(src) {
+        Ok(flat) => Ok(SkillDoc::from_flat(slug, flat)),
+        Err(FlatError::MissingKeys { keys }) => Err(OpenCompanyError::DataInvalid {
+            path,
+            problems: keys
+                .iter()
+                .map(|key| format!("skill `{slug}` is missing a `{key}` in its frontmatter."))
+                .collect(),
+        }),
+        Err(_) => Err(OpenCompanyError::DataParse {
+            path,
             message: "missing a `---` frontmatter block at the top of the file.".to_string(),
-        })?;
-
-    let mut extra_frontmatter = Vec::new();
-    let mut name = None;
-    let mut description = None;
-    let mut category = None;
-    let mut version = None;
-    for line in frontmatter.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let Some((key, value)) = line.split_once(':') else {
-            extra_frontmatter.push(line.to_string());
-            continue;
-        };
-        let value = value.trim().to_string();
-        match key.trim().to_ascii_lowercase().as_str() {
-            "name" if name.is_none() => name = Some(value),
-            "description" if description.is_none() => description = Some(value),
-            "category" if category.is_none() => category = Some(value),
-            "version" if version.is_none() => version = Some(value),
-            _ => extra_frontmatter.push(line.to_string()),
-        }
+        }),
     }
-
-    let mut problems = Vec::new();
-    let name = match name {
-        Some(name) if !name.is_empty() => name,
-        _ => {
-            problems.push(format!(
-                "skill `{slug}` is missing a `name` in its frontmatter."
-            ));
-            String::new()
-        }
-    };
-    let description = match description {
-        Some(description) if !description.is_empty() => description,
-        _ => {
-            problems.push(format!(
-                "skill `{slug}` is missing a `description` in its frontmatter."
-            ));
-            String::new()
-        }
-    };
-    if !problems.is_empty() {
-        return Err(OpenCompanyError::DataInvalid { path, problems });
-    }
-
-    Ok(SkillDoc {
-        slug: slug.to_string(),
-        name,
-        description,
-        category: category.filter(|value| !value.is_empty()),
-        version: version.filter(|value| !value.is_empty()),
-        body: body.to_string(),
-        extra_frontmatter,
-    })
 }
 
-/// Renders a [`SkillDoc`] back to `SKILL.md` source: a `---`-fenced frontmatter
-/// block followed by the body verbatim.
+/// Renders a [`SkillDoc`] back to `SKILL.md` source with
+/// [`tinyskills::render_flat`]: a `---`-fenced frontmatter block of `name`,
+/// `description`, then `category` and `version` when non-empty, then the
+/// [`SkillDoc::extra_frontmatter`] lines, followed by the body verbatim.
 ///
-/// This is the inverse of [`parse_skill_md`] for everything the parser keeps —
-/// `parse → render → parse` is a fixed point on the doc (the round-trip test
-/// below pins that). It is **not** byte-identical to the original source: the
-/// parser trims each scalar and drops unknown frontmatter keys, so a rendered
-/// doc is the canonical form rather than a faithful copy. Registry installs
-/// snapshot the original source directly, so nothing round-trips through here
-/// on the hot path — it exists so a doc assembled in memory can be persisted.
-///
-/// Each scalar is collapsed to one line (newlines become spaces), matching the
-/// line-based parser: that stops a value from injecting extra frontmatter keys
-/// or emitting a bare `---` that would close the block early.
+/// `parse → render → parse` is a fixed point on the doc, but the output is the
+/// canonical form rather than a copy of the original source: each scalar and
+/// extra line is collapsed to one trimmed line, so a value cannot inject a key
+/// or close the block early, and an extra line that would claim a recognised
+/// key is left out.
 pub fn render_skill_md(doc: &SkillDoc) -> String {
-    let one_line = |s: &str| s.replace(['\n', '\r'], " ").trim().to_string();
-    let mut out = String::from("---\n");
-    out.push_str(&format!("name: {}\n", one_line(&doc.name)));
-    out.push_str(&format!("description: {}\n", one_line(&doc.description)));
-    if let Some(category) = &doc.category {
-        out.push_str(&format!("category: {}\n", one_line(category)));
+    tinyskills::render_flat(&doc.to_flat())
+}
+
+impl SkillDoc {
+    /// The doc for `slug` from a document [`tinyskills::parse_flat`] read.
+    pub fn from_flat(slug: &str, flat: FlatSkill) -> Self {
+        Self {
+            slug: slug.to_string(),
+            name: flat.name,
+            description: flat.description,
+            category: flat.category,
+            version: flat.version,
+            body: flat.body,
+            extra_frontmatter: flat.extra_frontmatter,
+        }
     }
-    if let Some(version) = &doc.version {
-        out.push_str(&format!("version: {}\n", one_line(version)));
+
+    /// The doc as a [`FlatSkill`], without its slug.
+    pub fn to_flat(&self) -> FlatSkill {
+        FlatSkill {
+            name: self.name.clone(),
+            description: self.description.clone(),
+            category: self.category.clone(),
+            version: self.version.clone(),
+            body: self.body.clone(),
+            extra_frontmatter: self.extra_frontmatter.clone(),
+        }
     }
-    out.push_str("---\n");
-    out.push_str(&doc.body);
-    out
+
+    /// The doc's text surfaces, borrowed for [`tinyskills::scan_skill`].
+    pub fn scan_document(&self) -> tinyskills::ScanDocument<'_> {
+        tinyskills::ScanDocument {
+            name: &self.name,
+            description: &self.description,
+            category: self.category.as_deref(),
+            version: self.version.as_deref(),
+            body: &self.body,
+            extra_frontmatter: &self.extra_frontmatter,
+        }
+    }
 }
 
 /// The bundle directory the skill registry lists first.
@@ -264,38 +242,9 @@ pub fn load_dir_skills(dir: &Path) -> Result<Vec<SkillDoc>> {
     Ok(out)
 }
 
-/// Splits a document into its frontmatter inner text and its verbatim body.
-///
-/// Returns `None` when the document does not open with a `---` fence line or
-/// has no matching closing fence.
-pub(super) fn split_frontmatter(src: &str) -> Option<(&str, &str)> {
-    let src = src.strip_prefix('\u{feff}').unwrap_or(src);
-    let after_open = strip_fence_line(src)?;
-
-    let mut offset = 0;
-    for line in after_open.split_inclusive('\n') {
-        if line.trim_end_matches(['\r', '\n']) == "---" {
-            let frontmatter = &after_open[..offset];
-            let body = &after_open[offset + line.len()..];
-            return Some((frontmatter, body));
-        }
-        offset += line.len();
-    }
-    None
-}
-
-/// Consumes a leading `---` fence line, returning the text after it. The rest of
-/// that line must be blank.
-fn strip_fence_line(src: &str) -> Option<&str> {
-    let rest = src.strip_prefix("---")?;
-    match rest.find('\n') {
-        Some(newline) if rest[..newline].trim().is_empty() => Some(&rest[newline + 1..]),
-        Some(_) => None,
-        None if rest.trim().is_empty() => Some(""),
-        None => None,
-    }
-}
-
+#[cfg(test)]
+#[path = "skill_file_pins_tests.rs"]
+mod pins_tests;
 #[cfg(test)]
 #[path = "skill_file_tests.rs"]
 mod tests;

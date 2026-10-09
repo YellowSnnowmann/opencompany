@@ -154,8 +154,19 @@ pub fn run() {
     let consent = std::sync::Arc::new(analytics::ConsentGate::new(preferences.analytics_enabled()));
     let setup =
         analytics::AnalyticsSetup::for_preference(preferences.analytics_enabled(), consent.clone());
-    let local =
-        tauri::async_runtime::block_on(LocalHosts::load_with_analytics(data_dir.clone(), setup));
+    let context = tauri::generate_context!();
+    let skill_library =
+        tauri::utils::platform::resource_dir(context.package_info(), &tauri::Env::default())
+            .map(|dir| embedded::packaged_skill_library(&dir))
+            .inspect_err(
+                |error| tracing::warn!(%error, "no resource directory for the skill library"),
+            )
+            .ok();
+    let local = tauri::async_runtime::block_on(LocalHosts::load_with_library(
+        data_dir.clone(),
+        setup,
+        skill_library,
+    ));
 
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -204,7 +215,7 @@ pub fn run() {
             commands_analytics::oc_analytics_preference,
             commands_analytics::oc_set_analytics_preference,
         ])
-        .build(tauri::generate_context!());
+        .build(context);
 
     // Flushed from the exit event rather than after `run`, which on some
     // platforms never returns. Bounded, so a dead collector cannot hold the

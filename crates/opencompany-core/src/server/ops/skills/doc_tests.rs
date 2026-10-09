@@ -10,11 +10,11 @@ use axum::http::StatusCode;
 use serde_json::{Value, json};
 
 use crate::AppState;
-use crate::company::skill_digest;
 use crate::ports::skills_state::{SkillInstall, SkillSource, SkillState};
 use crate::ports::types::SkillChange;
 use crate::server::ops::language;
 use crate::server::ops::write_test_support::*;
+use tinyskills::document_digest;
 
 /// A slug neither the global baseline nor the repository library ships.
 const SLUG: &str = "library-skill";
@@ -47,7 +47,7 @@ fn install_of(pinned: &str) -> SkillState {
         custom_doc: Some(pinned.to_string()),
         updated_at_millis: Some(1_700_000_000_000),
         install: Some(SkillInstall {
-            digest: skill_digest(pinned),
+            digest: document_digest(pinned),
             version: Some("1.0.0".to_string()),
             installed_by: None,
             installed_at_millis: 1_700_000_000_000,
@@ -234,7 +234,7 @@ async fn writing_a_registry_install_keeps_the_pin_and_reports_it_modified() {
     );
     assert_eq!(
         row.install.map(|pin| pin.digest),
-        Some(skill_digest(&stored())),
+        Some(document_digest(&stored())),
         "the pin still names what the library shipped"
     );
 }
@@ -336,7 +336,7 @@ async fn an_edit_is_journalled_as_its_own_kind_of_change() {
     assert_eq!(edited.1, SkillChange::Edited);
     assert_eq!(
         edited.2,
-        Some(skill_digest(&rewritten())),
+        Some(document_digest(&rewritten())),
         "anchored to the document actually stored"
     );
 }

@@ -10,6 +10,8 @@ use super::*;
 
 use std::io::{Cursor, Write};
 
+use tinyskills::{MAX_ARCHIVE_BYTES, MAX_ARCHIVE_ENTRIES};
+
 use zip::write::{SimpleFileOptions, ZipWriter};
 
 const DOC: &str = "---\nname: Press Outreach\ndescription: Pitch a story.\n---\nSteps.\n";
@@ -238,4 +240,90 @@ fn a_document_that_is_not_utf8_is_refused() {
 fn a_file_that_is_not_an_archive_at_all_is_refused_as_unreadable() {
     let problem = read_upload("skill.zip", b"not a zip").unwrap_err();
     assert!(problem.contains("could not be read"), "{problem}");
+}
+
+#[test]
+fn archive_entries_prefixed_with_dot_slash_are_read_as_the_same_paths() {
+    let bytes = archive(&[
+        ("./press-outreach/", b""),
+        ("./press-outreach/SKILL.md", DOC.as_bytes()),
+    ]);
+    let read = read_upload("skill.zip", &bytes).unwrap();
+    assert_eq!(read.slug, "press-outreach");
+    assert_eq!(read.doc, DOC);
+
+    let read = read_upload("skill.zip", &archive(&[("./SKILL.md", DOC.as_bytes())])).unwrap();
+    assert_eq!(read.slug, "press-outreach");
+}
+
+#[test]
+fn archive_refusals_keep_their_operator_text() {
+    let names: Vec<String> = (0..=MAX_ARCHIVE_ENTRIES)
+        .map(|i| format!("press-outreach/file{i}.txt"))
+        .collect();
+    let entries: Vec<(&str, &[u8])> = names.iter().map(|n| (n.as_str(), b"x" as &[u8])).collect();
+    assert_eq!(
+        read_upload("skill.zip", &archive(&entries)).unwrap_err(),
+        format!(
+            "that archive holds {} entries — an uploaded skill may hold {MAX_ARCHIVE_ENTRIES}.",
+            MAX_ARCHIVE_ENTRIES + 1
+        )
+    );
+
+    let big = vec![b'a'; (MAX_ARCHIVE_BYTES as usize) + 1];
+    assert_eq!(
+        read_upload("skill.zip", &archive(&[("SKILL.md", &big)])).unwrap_err(),
+        "that archive expands to more than 1024 KB, which is more than an uploaded skill may hold."
+    );
+
+    let bytes = archive(&[
+        ("press-outreach/SKILL.md", DOC.as_bytes()),
+        ("press-outreach/a.txt", b"a"),
+        ("press-outreach/b.txt", b"b"),
+        ("press-outreach/c.txt", b"c"),
+        ("press-outreach/d.txt", b"d"),
+    ]);
+    assert_eq!(
+        read_upload("skill.zip", &bytes).unwrap_err(),
+        "that archive also carries `press-outreach/a.txt`, `press-outreach/b.txt`, \
+         `press-outreach/c.txt` and 1 more. A skill stores one document, so there is nowhere to \
+         keep bundled files — upload a `SKILL.md` on its own rather than have them dropped."
+    );
+
+    assert_eq!(
+        read_upload("skill.zip", &archive(&[("../SKILL.md", DOC.as_bytes())])).unwrap_err(),
+        "`../SKILL.md` in that archive points outside it. An uploaded skill is read as a \
+         directory of its own, so every entry has to sit inside it."
+    );
+    assert_eq!(
+        read_upload("skill.zip", &archive(&[("a/SKILL.md", b"\xff")])).unwrap_err(),
+        "that file is not UTF-8 text, so it is not a `SKILL.md`."
+    );
+    assert_eq!(
+        read_upload("skill.zip", &archive(&[("a/README.md", b"x")])).unwrap_err(),
+        "that archive has no `SKILL.md`. A skill archive carries one at the top level, or inside \
+         a single directory."
+    );
+    assert_eq!(
+        read_upload(
+            "skill.zip",
+            &archive(&[("SKILL.md", DOC.as_bytes()), ("a/b.md", b"x")])
+        )
+        .unwrap_err(),
+        "that archive has no single `SKILL.md`. A skill archive carries one at the top level, or \
+         inside a single directory."
+    );
+}
+
+#[test]
+fn mac_metadata_beside_the_skill_is_ignored() {
+    let bytes = archive(&[
+        ("press-outreach/SKILL.md", DOC.as_bytes()),
+        ("press-outreach/.DS_Store", b"x"),
+        ("__MACOSX/press-outreach/._SKILL.md", b"x"),
+    ]);
+    assert_eq!(
+        read_upload("skill.zip", &bytes).unwrap().slug,
+        "press-outreach"
+    );
 }

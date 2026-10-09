@@ -580,7 +580,7 @@ async fn uploading_over_a_pinned_skill_keeps_the_pin_and_its_provenance() {
         "a locally-edited registry install is still a registry install"
     );
     assert_ne!(
-        crate::company::skill_digest(&edited),
+        tinyskills::document_digest(&edited),
         pinned.digest,
         "the edited document differs from the pin, so it reads as modified"
     );

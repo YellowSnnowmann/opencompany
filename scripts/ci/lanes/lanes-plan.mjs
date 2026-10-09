@@ -350,6 +350,11 @@ export function buildPlan({ profile, areas, env = {} }) {
           run: `scripts/ci/run-scoped-suite.sh "media toolbelt" openhuman,mcp,media harness::built_in::toolbelt`,
         },
         {
+          name: "mcp-module",
+          when: rust,
+          run: `scripts/ci/run-scoped-suite.sh "mcp module" openhuman,mcp,media mcp::`,
+        },
+        {
           name: "mcp-oauth-state",
           when: rust,
           run: `scripts/ci/run-scoped-suite.sh "mcp oauth state" openhuman,mcp,media app::types`,

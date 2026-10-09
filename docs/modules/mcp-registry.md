@@ -11,7 +11,7 @@ which are addressed by an install id rather than by name.
 Issue #1270. Before it, the tab could only contain what somebody already knew
 the address of: an operator arrived with a URL or the list stayed empty. Nothing
 in `src/server/` reached `McpRuntime`
-([`harness::mcp`](../../src/harness/built_in/mcp.rs)), the wrapper over
+([`mcp::runtime`](../../src/mcp/runtime.rs)), the wrapper over
 OpenHuman's own MCP registry — the open `modelcontextprotocol/registry`, a
 SQLite store of installs, named write-only env credentials, boot-time connect and
 a supervisor — even though it is constructed for every company.
@@ -36,8 +36,8 @@ badges disagreeing.
 whether the console offers a delete, and both must answer to the declared list: a
 manifest server cannot be deleted, only disabled, so an install must not be able
 to capture that row and relabel it deletable. The deeper reason is that the
-declared list is what the *agents* reach — `registry_for_agent` builds each
-agent's registry from it and scopes it by `mcp:<name>` grants. Nothing is lost:
+declared list is what the *agents* reach — `resolve_for_agent` attaches it to
+each agent's spec, scoped by `mcp:<name>` grants. Nothing is lost:
 `serverId` rides on the reconciled row, so the registry routes still address it.
 
 The registry contributes only what the declared side has no field for —
@@ -150,7 +150,7 @@ erroring.
 
 Both tools address an install by a `server_id` argument at call time, so being
 wired is not the whole gate. Each is wrapped in `OcMcpRegistryScopedTool`
-(`harness::mcp`), which resolves that argument against the agent's effective
+(`mcp::agent`), which resolves that argument against the agent's effective
 grants through `grants_cover_registry_server`
 ([`runtime/tools.rs`](../../src/runtime/tools.rs)) before delegating:
 
@@ -168,6 +168,14 @@ this one and reach every third-party install. `grants_mcp_registry_explicit` —
 which decides whether these tools are wired at all — accepts only a grant rooted
 at `mcp_registry`, and the scoping predicate matches it, so the two gates cannot
 come to disagree about what confers the namespace.
+
+A `mcp_registry_tool_call` result also carries the same `McpCallOutcome` the
+native `mcp_call_tool` attaches: answered when the install replied, failed with
+the error's wire code when the vendored tool reports a string error body, and
+`ToolNotAllowed` on the decorator's own refusals. The MCP call observer reads it
+like any other call, so a directory install's answered calls are metered as
+`OauthCall` under `mcp:<server_id>` and its failures reach the operator bubble
+and the journal — see [What a call reports back](mcp.md#what-a-call-reports-back).
 
 ### The agent learns which installs exist from an allowlist
 
@@ -200,7 +208,7 @@ names are operator-mutable.
 
 A tool that *enumerates* installs rather than addressing one carries no
 `server_id` to gate on; such a tool must filter its rows through the same
-predicate, the way `registry_for_agent` filters declared servers with
+predicate, the way `resolve_for_agent` filters declared servers with
 `grants_cover_server`. `mcp_registry_installed_list` is the one that does.
 
 A registry row's `reachableBy` has not caught up to this gate yet: it still

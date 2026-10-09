@@ -2,92 +2,87 @@
 //!
 //! Many remote MCP servers gate access behind OAuth 2.0 (authorization-code +
 //! PKCE), advertised via a `401` challenge that points at an
-//! `oauth-protected-resource` document. This module runs that flow for the
-//! **console** path: the operator clicks *Sign in*, a browser tab opens the
-//! authorization server, and the redirect lands on the host's unauthenticated
-//! `/oauth/mcp/callback` route, which exchanges the code for a token and stores
-//! it write-only under the company's per-server credential key.
+//! `oauth-protected-resource` document. The operator clicks *Sign in*, a
+//! browser tab opens the authorization server, and the redirect lands on the
+//! host's unauthenticated `/oauth/mcp/callback` route, which exchanges the code
+//! for a token and stores it write-only under the company's per-server
+//! credential key.
 //!
-//! **Why a bespoke module and not `oh::mcp::registry::oauth`.** OpenHuman's full
-//! flow (`vendor/openhuman/crates/openhuman-core/src/mcp/registry/oauth.rs`) is coupled to
-//! its SQLite `mcp_registry` store and its desktop loopback callback
-//! (`http://127.0.0.1:<core_port>/…`). Our console path is multi-tenant and
-//! stores credentials in a per-tenant [`SecretStore`](crate::ports::SecretStore),
-//! so only the **discovery primitive** ([`oh::mcp::http_client::McpHttpClient`]) is
-//! reused; the small private helpers (PKCE, dynamic client registration, the
-//! authorize-URL builder, the token exchange + parse, and refresh) are **ported**
-//! here so they stay decoupled from OpenHuman's store and single-user callback.
+//! The flow itself is tinymcp's [`OAuthFlow`]: discovery, dynamic client
+//! registration, PKCE, the parked pending state, the code exchange and the
+//! refresh. It runs with [`OAuthFlow::require_public_endpoints`], so every
+//! discovery-supplied endpoint must be `https` on a public address. This module
+//! is the host side: the qualified server id a redirect resolves back to a
+//! company, and [`MaterialStore`], which maps the flow's credential map onto
+//! OpenCompany's stored [`AuthMaterial::OAuth`] so tokens minted before the
+//! swap keep working.
 //!
-//! **Security.** Every token this module mints is returned as an
-//! [`AuthMaterial::OAuth`], whose [`AuthMaterial::secret_values`] enumerates the
-//! access token, refresh token, and any confidential `client_secret` — so all of
-//! them feed the existing scrubber and can never survive into an error, a health
-//! record, or agent-visible output. Nothing here serializes a token into any
-//! operator-visible response.
+//! **Security.** Every token is returned as an [`AuthMaterial::OAuth`], whose
+//! [`AuthMaterial::secret_values`] enumerates the access token, refresh token,
+//! and any confidential `client_secret` — so all of them feed the scrubber and
+//! can never survive into an error, a health record, or agent-visible output.
+//! Nothing here logs or returns a token.
 //!
-//! Compiled only under `feature = "mcp"` (it needs the vendored discovery
-//! primitive plus `uuid` / `base64` / `url`).
+//! Compiled only under `feature = "mcp"`.
 
-use base64::Engine as _;
-use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
+use std::sync::{Mutex, OnceLock};
 
 use openhuman_core as oh;
 
 use oh::mcp::http_client::{AuthorizationServerMetadata, McpAuthorizationContext, McpHttpClient};
+use tinymcp::registry::oauth::{OAUTH_BUNDLE_KEY, OAuthBundle, OAuthCredentialStore, OAuthFlow};
 
 use crate::Result;
 use crate::company::mcp::AuthMaterial;
 use crate::error::OpenCompanyError;
 use crate::ports::types::CompanyId;
 
-/// The discovery/registration/token HTTP timeout, in seconds.
+/// The discovery HTTP timeout, in seconds.
 const HTTP_TIMEOUT_SECS: u64 = 20;
 
-/// base64url, no padding — the PKCE + entropy encoding.
-const B64: base64::engine::general_purpose::GeneralPurpose =
-    base64::engine::general_purpose::URL_SAFE_NO_PAD;
+/// The credential key the flow stores the access token under.
+const ACCESS_TOKEN_KEY: &str = "Authorization";
 
-/// Pending authorization parked between [`begin`] and the callback's
-/// [`complete`], keyed by the opaque `state` the console round-trips through the
-/// browser. Multi-tenant: unlike OpenHuman's single-user version it carries the
-/// `company_id` + `server_name` the callback must resolve, since the browser
-/// redirect carries no console session.
-#[derive(Clone, Debug)]
-pub struct PendingOAuth {
-    /// The company whose per-tenant secret store the token lands in.
-    pub company_id: CompanyId,
-    /// The MCP server (by slug) the token authenticates.
-    pub server_name: String,
-    /// The PKCE verifier proving this client began the flow.
-    pub code_verifier: String,
-    /// The dynamically-registered client id (RFC 7591).
-    pub client_id: String,
-    /// The confidential client secret, when the server issued one.
-    pub client_secret: Option<String>,
-    /// The token endpoint the code exchange POSTs to.
-    pub token_endpoint: String,
-    /// The exact redirect URI registered in DCR — must match on exchange.
-    pub redirect_uri: String,
+/// The scheme the flow prefixes the access token with.
+const BEARER_PREFIX: &str = "Bearer ";
+
+/// Separates the company from the server in a qualified server id. The company
+/// half is escaped so it never contains it; the server half may.
+const SERVER_ID_SEPARATOR: char = '/';
+
+const METADATA_FETCH_FAILED: &str = "fetching protected-resource metadata";
+const NO_AUTH_REQUIRED: &str = "does not require authorization";
+const ENDPOINT_REFUSED: &str = "endpoint refused";
+const ENDPOINT_HAS_NO_HOST: &str = "endpoint has no host";
+const INVALID_URL: &str = "invalid ";
+const UNKNOWN_STATE: &str = "unknown or expired oauth state";
+
+/// The client name dynamic registration sends, shown on the authorization
+/// server's consent screen.
+const CLIENT_NAME: &str = "OpenCompany";
+
+/// The console's OAuth flow: one per host, holding the authorizations parked
+/// between `oauth/start` and the callback.
+///
+/// # Panics
+///
+/// When the HTTP client cannot be built, which only a broken TLS setup does.
+pub fn console_flow() -> OAuthFlow {
+    named_flow().require_public_endpoints()
 }
 
-/// The output of [`begin`]: the live `/authorize` URL for the browser plus the
-/// `state`/`PendingOAuth` the route parks until the callback fires.
-pub struct OAuthBegin {
-    /// The authorization-server URL to open in the operator's browser.
-    pub authorize_url: String,
-    /// The opaque CSRF/state token the callback matches against.
-    pub state: String,
-    /// The pending record the caller stores keyed by `state`.
-    pub pending: PendingOAuth,
+fn named_flow() -> OAuthFlow {
+    OAuthFlow::new(None)
+        .expect("oauth http client must build")
+        .with_client_name(CLIENT_NAME)
 }
 
-/// Unix seconds now (best-effort; `0` if the clock is before the epoch).
-fn now_unix() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+/// The flow refreshes run through. Refreshing parks nothing, so one flow
+/// serves every company.
+fn refresh_flow() -> &'static OAuthFlow {
+    static FLOW: OnceLock<OAuthFlow> = OnceLock::new();
+    FLOW.get_or_init(console_flow)
 }
 
 /// The callback redirect URI: `<base>/oauth/mcp/callback`. `base` is the host's
@@ -99,235 +94,243 @@ pub fn callback_redirect_uri(base_url: &str) -> String {
     format!("{}/oauth/mcp/callback", base_url.trim_end_matches('/'))
 }
 
-/// `n` v4 UUIDs of entropy, base64url-encoded (no `rand` dependency — mirrors
-/// the OpenHuman helper).
-fn random_b64(n_uuids: usize) -> String {
-    let mut bytes = Vec::with_capacity(n_uuids * 16);
-    for _ in 0..n_uuids {
-        bytes.extend_from_slice(uuid::Uuid::new_v4().as_bytes());
-    }
-    B64.encode(bytes)
+/// The server id a pending authorization is parked under: the company and the
+/// server, so the callback — which carries no console session — learns both
+/// from the `state` alone.
+pub fn server_id(company: &CompanyId, server_name: &str) -> String {
+    format!(
+        "{}{SERVER_ID_SEPARATOR}{server_name}",
+        escape_company(company.as_ref())
+    )
 }
 
-/// A PKCE `(verifier, S256 challenge)` pair. The verifier is ~86 chars, inside
-/// the RFC 7636 43..128 range.
-fn gen_pkce() -> (String, String) {
-    let verifier = random_b64(4);
-    let challenge = B64.encode(Sha256::digest(verifier.as_bytes()));
-    (verifier, challenge)
+fn escape_company(company: &str) -> String {
+    company.replace('%', "%25").replace('/', "%2F")
 }
 
-/// Discover a server's OAuth authorization context via an unauthenticated MCP
-/// `initialize` probe. `Ok(None)` means the server did not 401 (open / static
-/// token). Errors surface a discovery failure.
-async fn discover(endpoint: &str) -> Result<Option<McpAuthorizationContext>> {
-    // Building the client is fallible now — a malformed proxy or an unusable
-    // TLS setting fails here rather than at the first request.
-    let client = McpHttpClient::new(endpoint.to_string(), HTTP_TIMEOUT_SECS)
-        .map_err(|e| OpenCompanyError::Harness(format!("oauth discovery client: {e}")))?;
-    client
-        .discover_authorization()
-        .await
-        .map_err(|e| OpenCompanyError::Harness(format!("oauth discovery failed: {e}")))
+fn unescape_company(company: &str) -> String {
+    company.replace("%2F", "/").replace("%25", "%")
 }
 
-/// Pick the authorization server that advertises a **usable** configuration:
-/// authorize + token + dynamic client registration, and (when grant types are
-/// listed) `authorization_code`. Pick by capability, not position — the first
-/// advertised server may be incomplete while a later one is fully usable
-/// (mirrors OpenHuman's `begin`).
-fn select_auth_server(ctx: McpAuthorizationContext) -> Option<AuthorizationServerMetadata> {
-    ctx.authorization_server_metadata.into_iter().find(|asm| {
-        asm.authorization_endpoint.is_some()
-            && asm.token_endpoint.is_some()
-            && asm.registration_endpoint.is_some()
-            && (asm.grant_types_supported.is_empty()
-                || asm
-                    .grant_types_supported
-                    .iter()
-                    .any(|g| g == "authorization_code"))
+/// The company and server a [`server_id`] names.
+pub fn split_server_id(server_id: &str) -> Option<(CompanyId, String)> {
+    let (company, server) = server_id.split_once(SERVER_ID_SEPARATOR)?;
+    (!company.is_empty() && !server.is_empty()).then(|| {
+        (
+            CompanyId::new(unescape_company(company)),
+            server.to_string(),
+        )
     })
 }
 
-/// A short-lived reqwest client for DCR + token calls. Separate from the MCP
-/// transport client (which speaks JSON-RPC), matching OpenHuman's split.
-fn http() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
-        .build()
-        .expect("reqwest client must build")
-}
-
-/// SSRF guard for a **discovery-supplied** OAuth endpoint. The MCP server we're
-/// signing into advertises its own registration/token/authorize URLs, and
-/// `begin` / `complete` / `refresh` then POST to them **server-side** — so an
-/// unvalidated endpoint is a server-side request-forgery primitive a hostile
-/// server can aim at internal services or the cloud metadata endpoint
-/// (`169.254.169.254`). Reject anything that isn't `https` or whose host
-/// resolves to a loopback/private/link-local/unspecified address. Ported (kept
-/// decoupled from OpenHuman's `url_guard`, which is `pub(super)` and unreachable
-/// here) so the console path validates every outbound OAuth target itself.
+/// The flow's view of one server's stored [`AuthMaterial`].
 ///
-/// Async because hostname resolution goes through [`tokio::net::lookup_host`],
-/// which offloads the blocking `getaddrinfo` to Tokio's blocking pool — a
-/// slow/hostile discovery-supplied host must not stall the executor thread.
-async fn guard_endpoint(raw: &str, what: &str) -> Result<()> {
-    let url = url::Url::parse(raw).map_err(|e| {
-        OpenCompanyError::InvalidRequest(format!("{what} endpoint is not a valid URL: {e}"))
-    })?;
-    if url.scheme() != "https" {
-        return Err(OpenCompanyError::InvalidRequest(format!(
-            "{what} endpoint must use https (got `{}`)",
-            url.scheme()
-        )));
-    }
-    let host = url
-        .host_str()
-        .ok_or_else(|| OpenCompanyError::InvalidRequest(format!("{what} endpoint has no host")))?;
-
-    // An IP-literal host is checked directly — no DNS round-trip needed.
-    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-        return if is_blocked_ip(&ip) {
-            Err(OpenCompanyError::InvalidRequest(format!(
-                "{what} endpoint resolves to a disallowed address"
-            )))
-        } else {
-            Ok(())
-        };
-    }
-
-    // Resolve the hostname and reject if it fails to resolve or if ANY resolved
-    // address is in a blocked range (a single blocked A/AAAA record is enough —
-    // this also blunts DNS-rebinding to an internal address). `lookup_host`
-    // keeps the blocking resolver call off the async executor thread.
-    let port = url.port_or_known_default().unwrap_or(443);
-    let mut resolved = false;
-    let addrs = tokio::net::lookup_host((host, port)).await.map_err(|e| {
-        OpenCompanyError::InvalidRequest(format!("{what} endpoint host does not resolve: {e}"))
-    })?;
-    for addr in addrs {
-        resolved = true;
-        if is_blocked_ip(&addr.ip()) {
-            return Err(OpenCompanyError::InvalidRequest(format!(
-                "{what} endpoint resolves to a disallowed address"
-            )));
-        }
-    }
-    if !resolved {
-        return Err(OpenCompanyError::InvalidRequest(format!(
-            "{what} endpoint host does not resolve"
-        )));
-    }
-    Ok(())
+/// Reads present the material as the flow stores it — the bearer under
+/// `Authorization` and the refresh bookkeeping as an [`OAuthBundle`] — and a
+/// write is captured as the [`AuthMaterial::OAuth`] it describes rather than
+/// persisted, so the caller stores it through
+/// [`store_auth`](crate::company::mcp::store_auth) exactly as before.
+pub struct MaterialStore {
+    endpoint: Option<String>,
+    current: AuthMaterial,
+    minted: Mutex<Option<AuthMaterial>>,
 }
 
-/// Whether an IP is in a range we refuse to POST OAuth material to (loopback,
-/// RFC 1918 / unique-local, link-local incl. the `169.254.169.254` metadata
-/// address, unspecified, broadcast, documentation, multicast).
-fn is_blocked_ip(ip: &std::net::IpAddr) -> bool {
-    match ip {
-        std::net::IpAddr::V4(v4) => {
-            v4.is_loopback()
-                || v4.is_private()
-                || v4.is_link_local()
-                || v4.is_unspecified()
-                || v4.is_broadcast()
-                || v4.is_documentation()
-                || v4.is_multicast()
-                || v4.octets()[0] == 0
+impl MaterialStore {
+    /// A store over `current`, for a server at `endpoint`.
+    pub fn new(endpoint: Option<String>, current: AuthMaterial) -> Self {
+        Self {
+            endpoint,
+            current,
+            minted: Mutex::new(None),
         }
-        std::net::IpAddr::V6(v6) => {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return is_blocked_ip(&std::net::IpAddr::V4(v4));
-            }
-            v6.is_loopback()
-                || v6.is_unspecified()
-                || v6.is_multicast()
-                || (v6.segments()[0] & 0xfe00) == 0xfc00 // unique-local fc00::/7
-                || (v6.segments()[0] & 0xffc0) == 0xfe80 // link-local fe80::/10
-        }
+    }
+
+    /// The material the flow wrote, if it wrote any.
+    pub fn minted(&self) -> Option<AuthMaterial> {
+        self.minted.lock().expect("minted material").clone()
     }
 }
 
-/// RFC 7591 dynamic client registration. Requests `client_secret_post`; servers
-/// that issue a confidential client return a `client_secret` we keep for the
-/// token exchange. Returns `(client_id, client_secret?)`.
-async fn register_client(
-    registration_endpoint: &str,
+/// `material` as the flow's credential map; empty unless it is OAuth.
+pub fn credentials_of(material: &AuthMaterial) -> BTreeMap<String, String> {
+    let AuthMaterial::OAuth {
+        access_token,
+        refresh_token,
+        client_id,
+        client_secret,
+        token_endpoint,
+        expires_at,
+    } = material
+    else {
+        return BTreeMap::new();
+    };
+    let bundle = OAuthBundle {
+        refresh_token: refresh_token.clone(),
+        client_id: client_id.clone(),
+        client_secret: client_secret.clone(),
+        token_endpoint: token_endpoint.clone(),
+        expires_at: *expires_at,
+    };
+    let mut credentials = BTreeMap::new();
+    credentials.insert(
+        ACCESS_TOKEN_KEY.to_string(),
+        format!("{BEARER_PREFIX}{access_token}"),
+    );
+    if let Ok(bundle) = serde_json::to_string(&bundle) {
+        credentials.insert(OAUTH_BUNDLE_KEY.to_string(), bundle);
+    }
+    credentials
+}
+
+/// The [`AuthMaterial::OAuth`] a credential map describes, when it holds both
+/// an access token and its bundle.
+pub fn material_of(credentials: &BTreeMap<String, String>) -> Option<AuthMaterial> {
+    let access = credentials.get(ACCESS_TOKEN_KEY)?;
+    let access = access.strip_prefix(BEARER_PREFIX).unwrap_or(access);
+    let bundle: OAuthBundle = serde_json::from_str(credentials.get(OAUTH_BUNDLE_KEY)?).ok()?;
+    Some(AuthMaterial::OAuth {
+        access_token: access.to_string(),
+        refresh_token: bundle.refresh_token,
+        client_id: bundle.client_id,
+        client_secret: bundle.client_secret,
+        token_endpoint: bundle.token_endpoint,
+        expires_at: bundle.expires_at,
+    })
+}
+
+impl OAuthCredentialStore for MaterialStore {
+    async fn remote_url(&self, _server_id: &str) -> tinymcp::Result<Option<String>> {
+        Ok(self.endpoint.clone())
+    }
+
+    async fn load_credentials(
+        &self,
+        _server_id: &str,
+    ) -> tinymcp::Result<BTreeMap<String, String>> {
+        Ok(credentials_of(&self.current))
+    }
+
+    async fn store_credentials(
+        &self,
+        _server_id: &str,
+        credentials: &BTreeMap<String, String>,
+    ) -> tinymcp::Result<()> {
+        *self.minted.lock().expect("minted material") = material_of(credentials);
+        Ok(())
+    }
+}
+
+/// Begins the browser-OAuth flow for `server_name` at `endpoint`, returning the
+/// live `/authorize` URL. The pending authorization is parked on `flow` under
+/// [`server_id`] until the callback's [`complete`].
+///
+/// Returns [`OpenCompanyError::InvalidRequest`] (a clean operator-actionable
+/// error) when the server needs no sign-in, when it does not advertise dynamic
+/// client registration — the operator should paste a static token instead —
+/// or when a discovery-supplied endpoint is refused.
+pub async fn begin(
+    flow: &OAuthFlow,
+    endpoint: &str,
+    company_id: &CompanyId,
+    server_name: &str,
     redirect_uri: &str,
-) -> Result<(String, Option<String>)> {
-    guard_endpoint(registration_endpoint, "registration").await?;
-    let body = json!({
-        "client_name": "OpenCompany",
-        "redirect_uris": [redirect_uri],
-        "grant_types": ["authorization_code", "refresh_token"],
-        "response_types": ["code"],
-        "token_endpoint_auth_method": "client_secret_post",
-    });
-    let resp = http()
-        .post(registration_endpoint)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| {
-            OpenCompanyError::Harness(format!("client registration request failed: {e}"))
-        })?;
-    let status = resp.status();
-    let json: Value = resp.json().await.map_err(|e| {
-        OpenCompanyError::Harness(format!("client registration returned non-JSON: {e}"))
-    })?;
-    if !status.is_success() {
-        // The error body carries `error`/`error_description`, never a secret (a
-        // client_secret is issued only on success), so surfacing the code is safe.
-        let code = json
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown");
-        return Err(OpenCompanyError::Harness(format!(
-            "dynamic client registration failed (HTTP {status}, {code})"
-        )));
-    }
-    let client_id = json
-        .get("client_id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            OpenCompanyError::Harness("registration response missing client_id".to_string())
-        })?
-        .to_string();
-    let client_secret = json
-        .get("client_secret")
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    Ok((client_id, client_secret))
-}
-
-/// Build the `/authorize` redirect URL (authorization-code + PKCE S256).
-/// `resource` is the MCP server URL, per the MCP authorization spec.
-fn build_authorize_url(
-    authorization_endpoint: &str,
-    client_id: &str,
-    redirect_uri: &str,
-    code_challenge: &str,
-    state: &str,
-    resource: &str,
 ) -> Result<String> {
-    url::Url::parse_with_params(
-        authorization_endpoint,
-        &[
-            ("response_type", "code"),
-            ("client_id", client_id),
-            ("redirect_uri", redirect_uri),
-            ("code_challenge", code_challenge),
-            ("code_challenge_method", "S256"),
-            ("state", state),
-            ("resource", resource),
-        ],
-    )
-    .map(|u| u.to_string())
-    .map_err(|e| OpenCompanyError::Harness(format!("failed to build authorize url: {e}")))
+    let store = MaterialStore::new(Some(endpoint.to_string()), AuthMaterial::None);
+    let authorize_url = flow
+        .begin(&store, &server_id(company_id, server_name), redirect_uri)
+        .await
+        .map_err(|error| begin_error(server_name, &error))?;
+    log::info!(
+        "[mcp-oauth] begin company={} server={server_name}",
+        company_id.as_ref()
+    );
+    Ok(authorize_url)
 }
 
-/// Begin the browser-OAuth flow for `server_name` at `endpoint`: discover →
+/// The operator-facing error for a sign-in that could not begin.
+fn begin_error(server_name: &str, error: &tinymcp::Error) -> OpenCompanyError {
+    match error {
+        tinymcp::Error::MalformedResponse { detail } if detail.contains(NO_AUTH_REQUIRED) => {
+            OpenCompanyError::InvalidRequest(format!(
+                "MCP server `{server_name}` does not require authorization — no OAuth sign-in is needed."
+            ))
+        }
+        tinymcp::Error::AuthDiscovery { detail, .. }
+            if detail.starts_with(METADATA_FETCH_FAILED) =>
+        {
+            OpenCompanyError::Harness(format!("oauth discovery failed: {error}"))
+        }
+        tinymcp::Error::AuthDiscovery { .. } => OpenCompanyError::InvalidRequest(format!(
+            "MCP server `{server_name}` requires OAuth but does not advertise dynamic client \
+             registration — paste a static API token in its credential field instead."
+        )),
+        tinymcp::Error::MalformedResponse { detail }
+            if detail.contains(ENDPOINT_REFUSED)
+                || detail.contains(ENDPOINT_HAS_NO_HOST)
+                || detail.starts_with(INVALID_URL) =>
+        {
+            OpenCompanyError::InvalidRequest(detail.clone())
+        }
+        other => OpenCompanyError::Harness(format!("oauth sign-in could not start: {other}")),
+    }
+}
+
+/// Completes the flow parked under `state`: exchanges `code` for a token and
+/// returns the [`AuthMaterial::OAuth`] the caller stores write-only.
+///
+/// The parked authorization is consumed whether or not the exchange succeeds.
+/// A state that is unknown, expired or already used is
+/// [`OpenCompanyError::InvalidRequest`]; a failed exchange is
+/// [`OpenCompanyError::Harness`].
+pub async fn complete(flow: &OAuthFlow, state: &str, code: &str) -> Result<AuthMaterial> {
+    let store = MaterialStore::new(None, AuthMaterial::None);
+    let server = flow
+        .complete(&store, state, code)
+        .await
+        .map_err(|error| match &error {
+            tinymcp::Error::MalformedResponse { detail } if detail == UNKNOWN_STATE => {
+                OpenCompanyError::InvalidRequest(detail.clone())
+            }
+            _ => OpenCompanyError::Harness(format!("token request failed: {error}")),
+        })?;
+    let material = store.minted().ok_or_else(|| {
+        OpenCompanyError::Harness("the token exchange returned no usable token".to_string())
+    })?;
+    log::info!("[mcp-oauth] complete server={server} — token minted");
+    Ok(material)
+}
+
+/// If `material` is an [`AuthMaterial::OAuth`] whose access token is expired or
+/// within a minute of expiring, and it holds a refresh token, mints a fresh
+/// access token and returns the updated material.
+///
+/// Returns `None` when there is nothing to refresh or the refresh fails (the
+/// caller keeps the old material and lets the next 401 re-prompt sign-in — a
+/// failed refresh must never brick the harness build).
+pub async fn refresh(material: &AuthMaterial) -> Option<AuthMaterial> {
+    refresh_with(refresh_flow(), material).await
+}
+
+/// [`refresh`] through a given flow.
+pub async fn refresh_with(flow: &OAuthFlow, material: &AuthMaterial) -> Option<AuthMaterial> {
+    if !matches!(material, AuthMaterial::OAuth { .. }) {
+        return None;
+    }
+    let store = MaterialStore::new(None, material.clone());
+    match flow.refresh(&store, "refresh").await {
+        Ok(true) => {
+            log::info!("[mcp-oauth] refreshed access token");
+            store.minted()
+        }
+        Ok(false) => None,
+        Err(error) => {
+            log::warn!("[mcp-oauth] refresh failed, keeping existing token: {error}");
+            None
+        }
+    }
+}
+
 /// How long [`supports_console_oauth`] will wait on OAuth discovery.
 ///
 /// Short on purpose: this is a refinement of an answer the probe already has,
@@ -344,274 +347,54 @@ const CONSOLE_OAUTH_DISCOVERY_TIMEOUT: std::time::Duration = std::time::Duration
 /// `registration_endpoint`, so there is no client for us to mint and no sign-in
 /// we can complete.
 ///
-/// Reuses [`select_auth_server`] rather than re-deriving the rule, so the
-/// question the probe asks and the one `begin` enforces cannot drift apart.
-///
 /// **Every failure answers `true`.** Discovery is a live outbound call and can
 /// fail for reasons that say nothing about the server's capabilities — a
 /// timeout, a transient 5xx, a network blip. Answering `false` on one of those
 /// would replace a working Sign in button with "paste a token" on a server that
-/// supports sign-in perfectly well, which is a worse outcome than today's
-/// behaviour. Unsure therefore means "leave it as it was".
+/// supports sign-in perfectly well. Unsure therefore means "leave it as it
+/// was" — which is why this is not [`OAuthFlow::detect`], whose discovery
+/// failure reads as "static token".
 pub(crate) async fn supports_console_oauth(endpoint: &str) -> bool {
-    // Bounded explicitly: this sits on the health-probe path, and a metadata
-    // endpoint that accepts a connection and then hangs would otherwise stall
-    // the probe for whatever the HTTP client's own default happens to be.
-    // Timing out answers `true` for the same reason every other failure does.
     let Ok(discovered) =
         tokio::time::timeout(CONSOLE_OAUTH_DISCOVERY_TIMEOUT, discover(endpoint)).await
     else {
         return true;
     };
     match discovered {
-        // No authorization context at all: the server did not ask for OAuth on
-        // this probe. Nothing to downgrade — the caller's classification stands.
         Ok(None) => true,
-        Ok(Some(ctx)) => select_auth_server(ctx).is_some(),
+        Ok(Some(ctx)) => ctx.authorization_server_metadata.iter().any(drivable),
         Err(_) => true,
     }
 }
 
-/// Discover the server's OAuth metadata, register a client via RFC 7591
-/// dynamic client registration → PKCE, and return the live `/authorize` URL plus
-/// the [`PendingOAuth`] the caller parks (keyed by the returned `state`).
-///
-/// Returns [`OpenCompanyError::InvalidRequest`] (a clean operator-actionable
-/// error) when the server does not advertise dynamic client registration — the
-/// operator should paste a static token instead.
-pub async fn begin(
-    endpoint: &str,
-    company_id: &CompanyId,
-    server_name: &str,
-    redirect_uri: &str,
-) -> Result<OAuthBegin> {
-    let ctx = discover(endpoint)
-        .await?
-        .ok_or_else(|| OpenCompanyError::InvalidRequest(format!(
-            "MCP server `{server_name}` does not require authorization — no OAuth sign-in is needed."
-        )))?;
-
-    // No usable auth server → the server can't do dynamic client registration.
-    // Tell the operator to paste a static token instead (edge case).
-    let asm = select_auth_server(ctx).ok_or_else(|| {
-        OpenCompanyError::InvalidRequest(format!(
-            "MCP server `{server_name}` requires OAuth but does not advertise dynamic client \
-             registration — paste a static API token in its credential field instead."
-        ))
-    })?;
-    let authorization_endpoint = asm
-        .authorization_endpoint
-        .ok_or_else(|| OpenCompanyError::Harness("no authorization_endpoint".to_string()))?;
-    let token_endpoint = asm
-        .token_endpoint
-        .ok_or_else(|| OpenCompanyError::Harness("no token_endpoint".to_string()))?;
-    let registration_endpoint = asm.registration_endpoint.ok_or_else(|| {
-        OpenCompanyError::InvalidRequest(format!(
-            "MCP server `{server_name}` requires OAuth but does not support dynamic client \
-             registration — paste a static API token instead."
-        ))
-    })?;
-
-    // Fail fast on unsafe discovery-supplied targets before any outbound call or
-    // before parking a pending flow whose stored `token_endpoint` refresh would
-    // later replay. `register_client` / `post_token_form` re-guard at call time.
-    guard_endpoint(&authorization_endpoint, "authorization").await?;
-    guard_endpoint(&token_endpoint, "token").await?;
-
-    let (client_id, client_secret) = register_client(&registration_endpoint, redirect_uri).await?;
-    let (code_verifier, code_challenge) = gen_pkce();
-    let state = uuid::Uuid::new_v4().to_string();
-
-    let authorize_url = build_authorize_url(
-        &authorization_endpoint,
-        &client_id,
-        redirect_uri,
-        &code_challenge,
-        &state,
-        endpoint,
-    )?;
-
-    log::info!(
-        "[mcp-oauth] begin company={} server={server_name} client_id={client_id}",
-        company_id.as_ref()
-    );
-
-    Ok(OAuthBegin {
-        authorize_url,
-        state,
-        pending: PendingOAuth {
-            company_id: company_id.clone(),
-            server_name: server_name.to_string(),
-            code_verifier,
-            client_id,
-            client_secret,
-            token_endpoint,
-            redirect_uri: redirect_uri.to_string(),
-        },
-    })
-}
-
-/// The parsed token-endpoint response.
-struct TokenResponse {
-    access_token: String,
-    refresh_token: Option<String>,
-    expires_in: Option<u64>,
-}
-
-/// POST a form to a token endpoint and return the JSON body (erroring on non-2xx
-/// without echoing the raw body — a token endpoint's success body carries the
-/// access token, so we never surface it).
-async fn post_token_form(endpoint: &str, form: &[(&str, &str)]) -> Result<Value> {
-    // Every token exchange + refresh POST funnels through here, so validating the
-    // target at this choke point guards both `complete` and `refresh` — and
-    // re-checks at call time (not just at `begin`), blunting a rebind between
-    // discovery and exchange.
-    guard_endpoint(endpoint, "token").await?;
-    let resp = http()
-        .post(endpoint)
-        .form(form)
-        .send()
+/// Discover a server's OAuth authorization context via an unauthenticated MCP
+/// `initialize` probe. `Ok(None)` means the server did not 401.
+async fn discover(endpoint: &str) -> Result<Option<McpAuthorizationContext>> {
+    let client = McpHttpClient::new(endpoint.to_string(), HTTP_TIMEOUT_SECS)
+        .map_err(|e| OpenCompanyError::Harness(format!("oauth discovery client: {e}")))?;
+    client
+        .discover_authorization()
         .await
-        .map_err(|e| OpenCompanyError::Harness(format!("token request failed: {e}")))?;
-    let status = resp.status();
-    let json: Value = resp
-        .json()
-        .await
-        .map_err(|e| OpenCompanyError::Harness(format!("token endpoint returned non-JSON: {e}")))?;
-    if !status.is_success() {
-        // Surface only the standard OAuth `error` code — never the whole body,
-        // which on some servers echoes back submitted material.
-        let code = json
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown");
-        return Err(OpenCompanyError::Harness(format!(
-            "token request rejected (HTTP {status}, {code})"
-        )));
-    }
-    Ok(json)
+        .map_err(|e| OpenCompanyError::Harness(format!("oauth discovery failed: {e}")))
 }
 
-fn parse_token_response(json: &Value) -> Result<TokenResponse> {
-    let access_token = json
-        .get("access_token")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            OpenCompanyError::Harness("token response missing access_token".to_string())
-        })?
-        .to_string();
-    Ok(TokenResponse {
-        access_token,
-        refresh_token: json
-            .get("refresh_token")
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        expires_in: json.get("expires_in").and_then(Value::as_u64),
-    })
+/// Whether [`OAuthFlow::begin`] could sign in through this authorization
+/// server: authorize, token and dynamic-registration endpoints, and (when
+/// grant types are listed) `authorization_code`.
+fn drivable(asm: &AuthorizationServerMetadata) -> bool {
+    asm.authorization_endpoint.is_some()
+        && asm.token_endpoint.is_some()
+        && asm.registration_endpoint.is_some()
+        && (asm.grant_types_supported.is_empty()
+            || asm
+                .grant_types_supported
+                .iter()
+                .any(|g| g == "authorization_code"))
 }
 
-/// Build an [`AuthMaterial::OAuth`] from a parsed token response + the client
-/// credentials it was minted with.
-fn material_from_tokens(
-    tokens: TokenResponse,
-    client_id: String,
-    client_secret: Option<String>,
-    token_endpoint: String,
-) -> AuthMaterial {
-    AuthMaterial::OAuth {
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token,
-        client_id,
-        client_secret,
-        token_endpoint,
-        expires_at: now_unix() + tokens.expires_in.unwrap_or(3600),
-    }
-}
-
-/// Complete the flow: exchange `code` (with the PKCE verifier + client creds)
-/// for a token, returning the [`AuthMaterial::OAuth`] the caller stores
-/// write-only. The `pending` was parked by [`begin`] and looked up by `state`.
-pub async fn complete(pending: &PendingOAuth, code: &str) -> Result<AuthMaterial> {
-    let mut form: Vec<(&str, &str)> = vec![
-        ("grant_type", "authorization_code"),
-        ("code", code),
-        ("redirect_uri", pending.redirect_uri.as_str()),
-        ("client_id", pending.client_id.as_str()),
-        ("code_verifier", pending.code_verifier.as_str()),
-    ];
-    if let Some(secret) = pending.client_secret.as_deref() {
-        form.push(("client_secret", secret));
-    }
-    let tokens = parse_token_response(&post_token_form(&pending.token_endpoint, &form).await?)?;
-    log::info!(
-        "[mcp-oauth] complete company={} server={} — token minted",
-        pending.company_id.as_ref(),
-        pending.server_name
-    );
-    Ok(material_from_tokens(
-        tokens,
-        pending.client_id.clone(),
-        pending.client_secret.clone(),
-        pending.token_endpoint.clone(),
-    ))
-}
-
-/// Whether an OAuth credential's access token is expired or within `slack_secs`
-/// of expiring.
-pub fn needs_refresh(material: &AuthMaterial, slack_secs: u64) -> bool {
-    matches!(material, AuthMaterial::OAuth { expires_at, .. } if *expires_at <= now_unix() + slack_secs)
-}
-
-/// If `material` is an [`AuthMaterial::OAuth`] with a refresh token, mint a fresh
-/// access token via the refresh-token grant and return the updated material.
-///
-/// Returns `Ok(None)` when the material is not OAuth, has no refresh token, or
-/// the refresh request fails (the caller keeps the old material and lets the next
-/// 401 re-prompt sign-in — a failed refresh must never brick the harness build).
-pub async fn refresh(material: &AuthMaterial) -> Option<AuthMaterial> {
-    let AuthMaterial::OAuth {
-        refresh_token: Some(refresh_token),
-        client_id,
-        client_secret,
-        token_endpoint,
-        ..
-    } = material
-    else {
-        return None;
-    };
-    if refresh_token.is_empty() {
-        return None;
-    }
-
-    let mut form: Vec<(&str, &str)> = vec![
-        ("grant_type", "refresh_token"),
-        ("refresh_token", refresh_token.as_str()),
-        ("client_id", client_id.as_str()),
-    ];
-    if let Some(secret) = client_secret.as_deref() {
-        form.push(("client_secret", secret));
-    }
-
-    let json = match post_token_form(token_endpoint, &form).await {
-        Ok(json) => json,
-        Err(e) => {
-            log::warn!("[mcp-oauth] refresh failed, keeping existing token: {e}");
-            return None;
-        }
-    };
-    let mut tokens = parse_token_response(&json).ok()?;
-    // Some servers omit a rotated refresh token — keep the existing one.
-    if tokens.refresh_token.is_none() {
-        tokens.refresh_token = Some(refresh_token.clone());
-    }
-    log::info!("[mcp-oauth] refreshed access token");
-    Some(material_from_tokens(
-        tokens,
-        client_id.clone(),
-        client_secret.clone(),
-        token_endpoint.clone(),
-    ))
-}
+#[cfg(test)]
+#[path = "mcp_oauth_fixture_tests.rs"]
+pub(crate) mod fixture;
 
 #[cfg(test)]
 #[path = "mcp_oauth_tests.rs"]

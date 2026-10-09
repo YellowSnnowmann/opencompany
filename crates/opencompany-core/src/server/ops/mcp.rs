@@ -27,9 +27,9 @@ use crate::company::mcp::{
     load_health, load_runtime_index, resolve_effective, save_runtime_index, store_auth,
     validate_one,
 };
-use crate::company::mcp_server_info::{self, McpServerInfo};
 use crate::company::runtime::CompanyRuntime;
 use crate::error::OpenCompanyError;
+use crate::mcp::decl::server_info::{self as mcp_server_info, McpServerInfo};
 use crate::metering::roster_display_names;
 use crate::ports::types::CompanyRecord;
 use crate::runtime::builder::agent_scoped_grants;
@@ -454,7 +454,7 @@ pub(super) fn roster_grants(record: &CompanyRecord) -> Vec<(RosterAgentDto, Vec<
 /// the shared [`grants_cover_server`] so this agrees with the harness registry.
 /// Empty ⇒ no teammate can reach the server.
 ///
-/// A **disabled** server reaches nobody regardless of grants: `registry_for_agent`
+/// A **disabled** server reaches nobody regardless of grants: `resolve_for_agent`
 /// filters on `decl.enabled && grants_cover_server(..)`, so an agent granted
 /// `mcp:<slug>` still gets no such tool while the server is off. Mirroring both
 /// halves of that filter here is what keeps the console from claiming a
@@ -885,10 +885,7 @@ async fn probe_and_persist(runtime: &CompanyRuntime, name: &str) -> Option<McpHe
     let decl = decls.iter().find(|d| d.name == name)?;
     // The probe already scrubs its message; what is persisted is that scrubbed
     // health, plus the inventory the same listing yielded.
-    Some(
-        crate::harness::mcp_probe::probe_and_record(runtime.id(), decl, runtime.secrets().as_ref())
-            .await,
-    )
+    Some(crate::mcp::probe::probe_and_record(runtime.id(), decl, runtime.secrets().as_ref()).await)
 }
 
 /// Without the `openhuman` feature there is no MCP transport, so probing is a
@@ -961,18 +958,20 @@ async fn discover_tools(
             })),
         )
             .into_response(),
-        Some(decl) => match crate::harness::mcp::discover_tools(&decls, &name).await {
+        Some(decl) => match crate::mcp::agent::discover_tools(&decls, &name).await {
             Ok(tools) => Json(tools).into_response(),
             Err(err) => {
                 // NEVER surface the raw error — it can carry a response body or a
                 // full request URL (with a query-parameter credential). Classify,
                 // scrub against this server's known secrets, and persist the
                 // scrubbed outcome as health.
-                use crate::harness::mcp_probe;
+                use crate::mcp::probe as mcp_probe;
                 let secrets = decl.auth.secret_values();
                 let class = mcp_probe::classify_mcp_error(&err, decl.auth.is_configured(), false);
-                let message =
-                    mcp_probe::scrub(&mcp_probe::operator_message(&name, &class, &err), &secrets);
+                let message = crate::redact::scrub(
+                    &mcp_probe::operator_message(&name, &class, &err),
+                    &secrets,
+                );
                 let health = McpHealth {
                     status: class.status,
                     message: message.clone(),
@@ -1049,7 +1048,8 @@ async fn test_server(company: ScopedCompany, Path(NamePath { name }): Path<NameP
 ///
 /// Resolves the server's effective endpoint, discovers its authorization server,
 /// dynamically registers a client (RFC 7591) + generates PKCE, parks the pending
-/// state on [`AppState`] keyed by the opaque `state`, and returns
+/// state on the host's console [`OAuthFlow`](tinymcp::registry::oauth::OAuthFlow)
+/// keyed by the opaque `state`, and returns
 /// `{ "authorizeUrl": … }` for the console to open in a browser tab. The redirect
 /// URI is derived from the host's public URL (or bind) so it matches what DCR
 /// registered — see [`crate::company::mcp_oauth::callback_redirect_uri`].
@@ -1084,15 +1084,16 @@ async fn start_oauth(
         .ok_or_else(|| ApiError(OpenCompanyError::McpServerNotFound(name.clone())))?;
 
     let redirect_uri = mcp_oauth::callback_redirect_uri(&state.config().host_base_url());
-    let begun = mcp_oauth::begin(&decl.endpoint, runtime.id(), &name, &redirect_uri)
-        .await
-        .map_err(ApiError)?;
-
-    // Park the pending flow; the unauthenticated callback route reclaims it.
-    state.park_oauth(begun.state.clone(), begun.pending);
-    Ok(Json(
-        serde_json::json!({ "authorizeUrl": begun.authorize_url }),
-    ))
+    let authorize_url = mcp_oauth::begin(
+        state.mcp_oauth(),
+        &decl.endpoint,
+        runtime.id(),
+        &name,
+        &redirect_uri,
+    )
+    .await
+    .map_err(ApiError)?;
+    Ok(Json(serde_json::json!({ "authorizeUrl": authorize_url })))
 }
 
 /// Without the `mcp` feature there is no OAuth transport, so starting a sign-in

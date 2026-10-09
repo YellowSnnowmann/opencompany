@@ -110,12 +110,6 @@ const DELIBERATE_DIFFERENCES: &[(&str, &str)] = &[
          environment here would only ever widen it",
     ),
     (
-        "state.with_skills_root",
-        "serve derives it from the `skills/` directory beside a checkout's \
-         `companies/`; a packaged install has neither, and pointing this at a \
-         fabricated path would be worse than serving no registry",
-    ),
-    (
         "builder.with_seed_dir",
         "seeds a company's workspace tree from `companies/<name>` in a \
          checkout. Desktop presets are compiled-in `&'static DesktopPreset` \

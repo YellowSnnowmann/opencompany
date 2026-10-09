@@ -81,33 +81,8 @@ mod manifest;
 /// what a `mascot:` wearer additionally overrides — a different axis, and a
 /// different closed vocabulary, validated the same way.
 pub mod mascot;
-pub mod mcp;
-/// The one rule that decides whether two MCP records name the same server,
-/// shared by the console's server list and the agent prompt that tells a model
-/// which dispatch tool reaches which server.
-pub(crate) mod mcp_endpoint;
-/// Which of an agent's two MCP dispatch tools reaches which connected server,
-/// rendered for its system prompt. Ungated: the prompt is composed from company
-/// data, and the rule is worth testing without a harness build.
-// The only caller is the prompt builder, which needs `openhuman` to exist and
-// `mcp` to be wired. The renderer stays ungated regardless so its tests run in
-// the default lane rather than only in the `mcp` lane's filter (issue #770).
-#[cfg_attr(not(all(feature = "openhuman", feature = "mcp")), allow(dead_code))]
-pub(crate) mod mcp_families;
-/// The bundle's MCP declaration file: `companies/<name>/mcp.json`. A vertical
-/// ships the tool servers its work needs the way it already ships its ledgers,
-/// rather than starting with an empty tool surface somebody has to fill in by
-/// hand from the console before the company can do anything.
-pub mod mcp_file;
-/// Per-tool approval policy for MCP servers: the tier vocabulary, the
-/// operator's stored overrides, and the ladder that resolves one from the
-/// other. Ungated — the console route that edits a policy ships without the
-/// harness, and the gate that enforces one ships with it.
-pub mod mcp_policy;
-/// What an MCP server says about itself — its own title, description, website
-/// and icon, read off the `serverInfo` block of its `initialize` reply and kept
-/// beside its health record.
-pub mod mcp_server_info;
+/// The MCP declaration data model, kept addressable at its old path.
+pub use crate::mcp::decl as mcp;
 pub mod paypal;
 // Console MCP OAuth (issue #90): discovery + PKCE + DCR + token exchange for the
 // per-tenant browser sign-in flow. Needs the vendored `oh::mcp::config_servers` discovery
@@ -151,16 +126,16 @@ pub mod setup;
 pub mod skill_draft;
 pub mod skill_effective;
 mod skill_file;
+/// The host's shared skill library and which directory a host serves it from.
+pub mod skill_library;
 pub mod skill_provenance;
-/// The scan every skill an operator did not write passes through, and the
-/// sanitizer that renders untrusted catalogue text as data. Always compiled:
-/// the write plane runs it on every install in every build, and the sanitizer
-/// is the structural half of the same control.
-pub mod skill_scan;
 /// One skill's answer to "who is this scoped to" — the read-side inversion of
 /// the per-agent allowlist, shared by both transports so a skill's detail panel
 /// and a teammate's page cannot disagree about the same scope.
 pub mod skill_scope;
+/// A company's skill set assembled from its named layers, so every reader
+/// folds the same ones.
+pub mod skill_set;
 /// Reading a skill an operator uploaded — a bare `SKILL.md`, or an archive
 /// carrying one — with the archive's shape refused before anything is
 /// decompressed.
@@ -237,6 +212,7 @@ pub mod workspace_sweep;
 
 use std::path::Path;
 
+pub use crate::mcp::decl::file::{MCP_FILE, has_mcp_file, load_dir_mcp_servers};
 pub use credentials::{Credential, CredentialSource, TinyhumansTokenSource, TokenTier};
 pub use ledger_file::{LEDGERS_DIR, has_ledger_files, load_dir_ledgers};
 /// The roster-id grammar check, shared with the runtime id minter so a slug and
@@ -245,14 +221,11 @@ pub use ledger_file::{LEDGERS_DIR, has_ledger_files, load_dir_ledgers};
 #[cfg(test)]
 pub(crate) use manifest::is_snake_case;
 pub use manifest::{DELEGATES_TO_WILDCARD, LEGACY_MANIFEST_FILE, Located, MANIFEST_FILE, discover};
-pub use mcp_file::{MCP_FILE, has_mcp_file, load_dir_mcp_servers};
 pub use skill_effective::{EffectiveSkill, SkillBody, SkillContent};
 pub use skill_file::{
     SkillDoc, load_catalog_skills, load_dir_skills, parse_skill_md, render_skill_md,
 };
-pub use skill_provenance::{
-    SkillDrift, VersionChange, drift, effective_drift, skill_digest, trust_tier,
-};
+pub use skill_provenance::{SkillDrift, VersionChange, drift, effective_drift, trust_tier};
 pub use task_file::{TASKS_FILE, TaskSeed, has_task_file, load_dir_tasks};
 pub use types::{
     ACP_AGENTS, ACP_TRANSPORTS, AcpHarness, Agent, BRAIN_MODES, Brain, Budget, ChannelConfig,

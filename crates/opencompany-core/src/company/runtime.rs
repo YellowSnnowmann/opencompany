@@ -508,7 +508,7 @@ pub struct CompanyRuntime {
     /// company-home-scoped OpenHuman config while the live registry remains
     /// shared in-process with harness agents.
     #[cfg(feature = "mcp")]
-    pub(crate) mcp: Option<Arc<crate::harness::mcp::McpRuntime>>,
+    pub(crate) mcp: Option<Arc<crate::mcp::runtime::McpRuntime>>,
 }
 
 /// The event the runtime appends when a continuation could not be picked back
@@ -886,13 +886,13 @@ impl CompanyRuntime {
 
     /// Attaches the embedded MCP runtime used by REST and harness agents.
     #[cfg(feature = "mcp")]
-    pub fn set_mcp(&mut self, mcp: Arc<crate::harness::mcp::McpRuntime>) {
+    pub fn set_mcp(&mut self, mcp: Arc<crate::mcp::runtime::McpRuntime>) {
         self.mcp = Some(mcp);
     }
 
     /// Returns this company's embedded MCP runtime when the feature is enabled.
     #[cfg(feature = "mcp")]
-    pub fn mcp(&self) -> Option<&Arc<crate::harness::mcp::McpRuntime>> {
+    pub fn mcp(&self) -> Option<&Arc<crate::mcp::runtime::McpRuntime>> {
         self.mcp.as_ref()
     }
 

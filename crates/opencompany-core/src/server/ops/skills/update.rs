@@ -36,7 +36,7 @@ use serde::Deserialize;
 
 use crate::AppState;
 use crate::company::skill_validate::validate_slug;
-use crate::company::{drift, render_skill_md, skill_digest};
+use crate::company::{drift, render_skill_md};
 use crate::error::OpenCompanyError;
 use crate::ports::now_millis;
 use crate::ports::skills_state::{SkillInstall, SkillSource, SkillState};
@@ -44,6 +44,7 @@ use crate::ports::types::SkillChange;
 use crate::server::error::ApiError;
 use crate::server::ops::language;
 use crate::server::ops::{AdminScopedCompany, scoped};
+use tinyskills::document_digest;
 
 use super::drift::row_drift;
 use super::journal::journal_write;
@@ -126,7 +127,7 @@ async fn update(
         enabled: row.enabled,
         source: SkillSource::Registry,
         install: Some(SkillInstall {
-            digest: skill_digest(&doc),
+            digest: document_digest(&doc),
             version: live.version.clone(),
             installed_by: Some(company.actor()),
             installed_at_millis: now_millis(),

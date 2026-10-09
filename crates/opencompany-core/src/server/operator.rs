@@ -1574,9 +1574,9 @@ fn project_event_for_viewer(
             }
             o
         }
-        // `message` is scrubbed at the source (`OcMcpCallTool` → `HarnessBrain`
-        // drain), so it can never carry a credential, response body, or URL query
-        // string — safe to forward verbatim. See `CompanyEvent::McpCallFailed`.
+        // `message` is scrubbed before it is journaled, so it can never carry a
+        // credential, response body, or URL query string — safe to forward
+        // verbatim. See `CompanyEvent::McpCallFailed`.
         CompanyEvent::McpCallFailed {
             server,
             tool,

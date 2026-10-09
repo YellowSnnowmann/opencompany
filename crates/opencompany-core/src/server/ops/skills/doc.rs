@@ -33,7 +33,7 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
-use crate::company::skill_effective::{self, SkillBody};
+use crate::company::skill_effective::SkillBody;
 use crate::company::skill_scope::agents_for_skill;
 use crate::company::skill_validate::validate_slug;
 use crate::error::OpenCompanyError;
@@ -90,9 +90,11 @@ fn editable(source: SkillSource) -> bool {
 /// `GET …/skills/{slug}/doc` — the document the company's agents read for this
 /// slug.
 ///
-/// Resolved through [`skill_effective::resolve`], the same derivation
-/// `GET …/skills` reports from, so the editor opens on what is actually in
-/// effect rather than on whichever layer happened to be consulted. A bundle
+/// Resolved through
+/// [`load_runtime_skill_set`](crate::company::skill_set::load_runtime_skill_set),
+/// the same derivation `GET …/skills` reports from, so the editor opens on what
+/// is actually in effect rather than on whichever layer happened to be
+/// consulted. A bundle
 /// entry is read off disk; every other layer already carries its rendered text.
 async fn read_doc(
     State(state): State<AppState>,
@@ -102,20 +104,19 @@ async fn read_doc(
     if let Err(problem) = validate_slug(&slug) {
         return Err(ApiError(OpenCompanyError::InvalidRequest(problem)));
     }
-    let mut deltas = company.runtime.skills().list(company.id()).await?;
-    deltas.extend(skill_effective::globals_skill_disables(
-        &company.runtime.globals_disable().await?,
-    ));
-    let registry = state.shared_skill_registry()?;
-    let effective = skill_effective::resolve(company.runtime.source_dir(), &registry, &deltas)?;
-    let found = effective
-        .into_iter()
-        .find(|skill| skill.slug == slug)
-        .ok_or_else(|| {
-            ApiError(OpenCompanyError::NotFound(
-                language::SKILL_NO_DOC.to_string(),
-            ))
-        })?;
+    let found = crate::company::skill_set::load_runtime_skill_set(
+        &company.runtime,
+        state.shared_skill_registry()?,
+    )
+    .await?
+    .effective
+    .into_iter()
+    .find(|skill| skill.slug == slug)
+    .ok_or_else(|| {
+        ApiError(OpenCompanyError::NotFound(
+            language::SKILL_NO_DOC.to_string(),
+        ))
+    })?;
     // A row no layer supplied a document for reaches no agent either, so there
     // is nothing to serve and nothing an editor could usefully open.
     let content = found.content.as_ref().ok_or_else(|| {

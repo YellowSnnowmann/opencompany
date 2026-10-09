@@ -1,6 +1,6 @@
 //! The scan at the write plane: what a verdict does to the store.
 //!
-//! The report shape is pinned by `company::skill_scan`'s own tests. What is
+//! The report shape is pinned by `tinyskills::scan_skill`'s own tests. What is
 //! asserted here is the consequence — a `block` must leave the
 //! [`SkillStateStore`](crate::ports::SkillStateStore) untouched, which is a
 //! claim about the store rather than about a status code. A handler that

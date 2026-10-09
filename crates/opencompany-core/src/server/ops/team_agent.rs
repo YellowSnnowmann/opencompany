@@ -610,7 +610,7 @@ pub(super) fn agent_skills(
 ) -> AgentSkillsDto {
     let requested = requested_skills(record, agent_id);
     AgentSkillsDto {
-        effective: crate::runtime::builder::agent_effective_skills(
+        effective: crate::company::skill_scope::agent_effective_skills(
             company_enabled,
             requested.as_deref(),
         ),
@@ -816,18 +816,16 @@ pub(super) async fn company_enabled_skills(
     state: &AppState,
     company: &ScopedCompany,
 ) -> Result<Vec<String>, ApiError> {
-    let mut deltas = company.runtime.skills().list(company.id()).await?;
-    deltas.extend(crate::company::skill_effective::globals_skill_disables(
-        &company.runtime.globals_disable().await?,
-    ));
-    let registry = state.shared_skill_registry()?;
-    Ok(
-        crate::company::skill_effective::resolve(company.runtime.source_dir(), &registry, &deltas)?
-            .into_iter()
-            .filter(|skill| skill.enabled)
-            .map(|skill| skill.slug)
-            .collect(),
+    Ok(crate::company::skill_set::load_runtime_skill_set(
+        &company.runtime,
+        state.shared_skill_registry()?,
     )
+    .await?
+    .effective
+    .into_iter()
+    .filter(|skill| skill.enabled)
+    .map(|skill| skill.slug)
+    .collect())
 }
 
 /// `PATCH {scope}/team/{agent_id}` — edit a teammate.

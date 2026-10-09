@@ -332,7 +332,7 @@ fn the_advertised_schema_matches_the_arguments_the_parser_reads() {
 /// The regression guard for #410's actual root cause.
 ///
 /// A tool body must never be sized by
-/// [`SCRUB_MAX_BYTES`](crate::harness::mcp_probe::SCRUB_MAX_BYTES). That
+/// [`SCRUB_MAX_BYTES`](crate::redact::SCRUB_MAX_BYTES). That
 /// constant is a 300-byte cap on a one-line operator message, and routing a
 /// successful Composio result through it is what turned a 260-action
 /// catalogue into "the first action and half of its schema, ending in `…`".
@@ -341,7 +341,7 @@ fn the_advertised_schema_matches_the_arguments_the_parser_reads() {
 /// says so.
 #[test]
 fn a_tool_body_is_bounded_as_a_body_not_as_a_message() {
-    use crate::harness::mcp_probe::{SCRUB_MAX_BYTES, redact, scrub};
+    use crate::redact::{SCRUB_MAX_BYTES, redact, scrub};
 
     let body = format!("secret-token {}", "payload ".repeat(4_000));
     let secrets = vec!["secret-token".to_string()];

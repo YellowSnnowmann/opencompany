@@ -248,14 +248,14 @@ async fn a_lifecycle_delegation_for_a_missing_card_is_a_no_op() {
 /// event log is wired (the Activity-trace re-skin of the old warning bubble).
 #[tokio::test]
 async fn mcp_failures_surface_as_error_steps_and_event() {
-    use crate::harness::mcp_probe::McpFailure;
+    use crate::mcp::probe::McpFailure;
     use crate::ports::EventLog;
     use crate::ports::types::EventSeq;
     use crate::store::FsEventLog;
 
     let dir = tempfile::tempdir().unwrap();
     let events: Arc<dyn EventLog> = Arc::new(FsEventLog::new(dir.path()));
-    let failures = crate::harness::mcp_probe::McpFailureQueue::default();
+    let failures = crate::mcp::observe::McpCallObserver::default();
     let deps = HarnessDeps {
         hive_store: None,
         emergency_gate: None,
@@ -314,7 +314,7 @@ async fn mcp_failures_surface_as_error_steps_and_event() {
     let brain = HarnessBrain::new(Arc::new(HarnessPool::new()), deps, record());
 
     // A failure recorded during the turn (its message already scrubbed).
-    failures.push(McpFailure {
+    failures.record(McpFailure {
         server: "browserbase".into(),
         tool: "browse".into(),
         status: "tool_call_rejected".into(),
@@ -357,14 +357,14 @@ async fn mcp_failures_surface_as_error_steps_and_event() {
 /// #185 review follow-up: one bad journal write must not swallow the rest of
 /// the batch.
 ///
-/// `McpFailureQueue::drain` is a `mem::take` — by the time the loop runs the
+/// `McpCallObserver::drain` is a `mem::take` — by the time the loop runs the
 /// queue is empty and the batch exists only in that iterator. Propagating
 /// the first append error with `?` therefore did not merely skip one audit
 /// event, it discarded every failure behind it with nothing left to retry
 /// from. Journaling is per-item best-effort so the drain always completes.
 #[tokio::test]
 async fn a_failed_journal_write_does_not_swallow_the_rest_of_the_drain() {
-    use crate::harness::mcp_probe::McpFailure;
+    use crate::mcp::probe::McpFailure;
     use crate::ports::EventLog;
     use crate::ports::types::{EventSeq, StoredEvent};
     use futures::stream::{self, BoxStream};
@@ -410,7 +410,7 @@ async fn a_failed_journal_write_does_not_swallow_the_rest_of_the_drain() {
 
     let dir = tempfile::tempdir().unwrap();
     let log = Arc::new(FailFirstLog::default());
-    let failures = crate::harness::mcp_probe::McpFailureQueue::default();
+    let failures = crate::mcp::observe::McpCallObserver::default();
     let deps = HarnessDeps {
         hive_store: None,
         emergency_gate: None,
@@ -469,7 +469,7 @@ async fn a_failed_journal_write_does_not_swallow_the_rest_of_the_drain() {
     let brain = HarnessBrain::new(Arc::new(HarnessPool::new()), deps, record());
 
     for server in ["first", "second", "third"] {
-        failures.push(McpFailure {
+        failures.record(McpFailure {
             server: server.into(),
             tool: "browse".into(),
             status: "tool_call_rejected".into(),

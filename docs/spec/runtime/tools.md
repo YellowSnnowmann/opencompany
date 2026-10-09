@@ -197,7 +197,7 @@ A company's effective servers merge in four layers, lowest precedence first:
 1. **Default** — `[[default_mcp_server]]` in the instance `config.toml`, shipped
    to every company on the install (`docs/spec/runtime/config.md`).
 2. **Bundle** — `companies/<name>/mcp.json`, in the `{"mcpServers": {…}}` shape
-   every other MCP host uses. Parsed by `src/company/mcp_file.rs` and merged into
+   every other MCP host uses. Parsed by `src/mcp/decl/file.rs` and merged into
    `mcp_servers` by `CompanyManifest::from_located` **before** validation, so a
    bundle server is held to exactly the rules an inline entry is — HTTP
    transport only, no credential in the URL, unique name.

@@ -12,6 +12,10 @@ manager to launch one with.
 
 Directory browsing landed in issue #1270; see [The directory](#the-directory).
 
+The code lives under `src/mcp/` — declarations, per-tool policy, probing, the
+registry store and what each agent reaches; see its
+[README](../../src/mcp/README.md).
+
 ## Where servers come from
 
 A company's *effective* MCP servers are the union of the sources below, merged
@@ -31,6 +35,15 @@ its `manifest` badge):
    # auth_secret = "mcp/notion/auth"   # optional; names a SecretStore key
    ```
 
+   A bundle may also ship its servers as `companies/<name>/mcp.json`, in the
+   `mcpServers` shape. It is read by tinymcp's `config_doc::parse_with` in
+   lenient mode, with `endpoint`, `readOnlyTools`, `authSecret` and `$comment`
+   registered as host fields ([`mcp::decl::file`](../../src/mcp/decl/file.rs)).
+   An entry tinymcp refuses — an unknown field, a wrong type — is dropped and
+   reported as a manifest problem without costing its siblings; an inline
+   `headers` block or a query-string credential is refused because the file is
+   committed.
+
 2. **Runtime** — servers the operator adds through the console, persisted as a
    single JSON index in the [`SecretStore`](../../src/ports/secrets.rs) under
    `mcp/servers`.
@@ -44,7 +57,7 @@ its `manifest` badge):
    [The directory](#the-directory).
 
 Validation (manifest + API): unique names, an `http(s)://` endpoint, and no
-stdio `command`. See [`company::mcp`](../../src/company/mcp.rs).
+stdio `command`. See [`mcp::decl`](../../src/mcp/decl/validate.rs).
 
 ## Credentials are write-only
 
@@ -56,18 +69,20 @@ read shape carries only an `authConfigured` boolean.
 The agent-facing surface is redacted too: no company agent's tool scope names
 `mcp_list_servers`, because OpenHuman's own implementation serializes each
 server's credentials into agent-visible output. The persona brief names the
-agent's granted servers instead — names only, no endpoint or auth. A regression
-test drives `mcp_call_tool` against an in-process MCP server and asserts the
-bearer reaches the *server* over the wire but never appears in any `ToolResult`.
+agent's granted servers instead — names only, no endpoint or auth. Regression
+tests drive the native `mcp_call_tool` against an in-process MCP server and
+assert the bearer reaches the *server* over the wire but never appears in any
+`ToolResult`, including when the server reflects it into an error or a success.
 
 ## Per-agent scoping
 
 An agent reaches a server named `<slug>` only when its manifest `tools` grants
 match `mcp:<slug>` — the same glob semantics as every other tool grant
-(`mcp:*` grants all). `registry_for_agent` filters the resolved decls to the
-enabled, granted set and folds them into a one-registry `oh::Config` with
-`gitbooks.enabled = false` (so OpenHuman's default gitbooks server never leaks
-into a tenant agent). An agent with no granted MCP server gets no bridge tools.
+(`mcp:*` grants all). `resolve_for_agent` filters the resolved decls to the
+enabled, granted set and attaches each to the agent's spec, with every tool the
+agent's per-tool policy blocks on its deny list; `gitbooks.enabled = false` keeps
+OpenHuman's default gitbooks server out. An agent with no granted MCP server has
+no `mcp_list_tools` / `mcp_call_tool` in its tool scope.
 
 ```toml
 [[agent]]
@@ -96,6 +111,43 @@ agent's first move.
 The classifications remain declared in
 [`policy::consequence`](../../src/policy/consequence.rs) for audit and for a
 future policy-HITL mode.
+
+## What a call reports back
+
+Every `mcp_call_tool` result carries tinymcp's `McpCallOutcome` as host-only
+metadata (`{kind: "mcp_call", server, tool, ok, error?}`), which OpenHuman
+forwards on the turn's completed-call events. After each turn the agent's
+`AgentMcpObserver` ([`mcp::observe`](../../src/mcp/observe.rs)) reads them:
+
+- **`ok: true`** — the server answered, even if the remote tool returned its own
+  error. One `OauthCall` usage sample is recorded under `mcp:<server>`.
+- **`ok: false`** — the call failed before an answer: a 401, a transport error,
+  a non-MCP reply, a JSON-RPC rejection. It is classified by
+  `probe::classify_call_error` into the same status codes a probe uses
+  (`credential_required`, `oauth_required`, `token_rejected`, `unreachable`, …),
+  scrubbed against the server's credentials, and recorded on the company's
+  `McpCallObserver`. The brain drains it onto the operator bubble as a red
+  `MCP: <server> unavailable` step and journals a `McpCallFailed` event,
+  stamped with the task id on a dispatched card.
+- **Refusals** — a blocked tool (`ToolNotAllowed`) or malformed arguments — are
+  neither metered nor surfaced; the agent reads the refusal in its result.
+
+The registry bridge's `mcp_registry_tool_call` carries the same outcome (see
+[Directory-installed MCP servers](mcp-registry.md)), so both bridges meter and
+surface alike.
+
+## Signing in with OAuth
+
+`POST …/mcp/servers/{name}/oauth/start` and the unauthenticated
+`/oauth/mcp/callback` run tinymcp's `OAuthFlow` with
+`require_public_endpoints`: discovery, dynamic client registration, PKCE and the
+code exchange, every discovery-supplied endpoint refused unless it is `https` on
+a public address. One flow per host holds the parked sign-ins, keyed by
+`state` under `<company>/<server>`, and sweeps abandoned ones after ten minutes.
+The minted token is stored through `store_auth` as `AuthMaterial::OAuth`, and
+the harness refreshes a near-expiry one through `OAuthFlow::refresh`, which
+re-checks the stored token endpoint
+([`company::mcp_oauth`](../../src/company/mcp_oauth.rs)).
 
 ## Per-tool permissions
 
@@ -224,8 +276,8 @@ explicit grant that reaches them and the per-install scoping under it live in
 ## Which builds can honour a server (issue #567)
 
 The management routes above are **ungated** — they ship in every build. The
-agent-side bridge is not: `registry_for_agent` is pushed onto a teammate's belt
-behind `#[cfg(feature = "mcp")]`. Three configurations, only one of which the
+agent-side bridge is not: servers are attached to a teammate's spec only behind
+`#[cfg(feature = "mcp")]`. Three configurations, only one of which the
 routes alone distinguish:
 
 | Build | CRUD | Discovery / probe | Agent tools |

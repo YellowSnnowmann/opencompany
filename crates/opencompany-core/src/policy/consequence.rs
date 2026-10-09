@@ -350,7 +350,7 @@ pub const MCP_CALL_TOOL: &str = "mcp_call_tool";
 pub const MCP_REGISTRY_TOOL_CALL: &str = "mcp_registry_tool_call";
 
 /// The argument key [`MCP_CALL_TOOL`] names its server under. A required
-/// parameter of the tool's schema (`OcMcpCallTool::parameters_schema`), so a
+/// parameter of `mcp_call_tool`'s schema, so a
 /// call this cannot read could not have run — and stays gated.
 pub(crate) const MCP_CALL_SERVER_KEY: &str = "server";
 

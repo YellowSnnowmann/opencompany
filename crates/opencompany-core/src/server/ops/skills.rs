@@ -27,12 +27,12 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
-use crate::company::skill_effective::{self, EffectiveSkill};
+use crate::company::skill_effective::EffectiveSkill;
 use crate::company::skill_scope::agents_for_skill;
+use crate::company::skill_set;
 use crate::company::skill_validate::{MAX_SLUG_CHARS, slugify, validate_slug, validate_slug_shape};
 use crate::company::{
     SkillDoc, SkillDrift, VersionChange, effective_drift, parse_skill_md, render_skill_md,
-    skill_digest,
 };
 use crate::error::OpenCompanyError;
 use crate::ports::now_millis;
@@ -41,6 +41,7 @@ use crate::ports::types::SkillChange;
 use crate::server::error::ApiError;
 use crate::server::ops::language;
 use crate::server::ops::{AdminScopedCompany, ScopedCompany, scoped};
+use tinyskills::document_digest;
 
 /// The default category stamped on a skill whose doc carries none.
 const DEFAULT_CATEGORY: &str = "Ops";
@@ -174,8 +175,9 @@ impl InstalledSkill {
     }
 
     /// Projects one entry of the company's effective set
-    /// ([`skill_effective::resolve`]) to the console shape. An entry no layer
-    /// supplied a document for is rendered from its slug alone.
+    /// ([`resolve`](crate::company::skill_effective::resolve)) to the console
+    /// shape. An entry no layer supplied a document for is rendered from its
+    /// slug alone.
     ///
     /// `registry` is the host's shared library, which a pinned install is
     /// measured against — the list is where an operator learns that one has
@@ -248,10 +250,10 @@ struct CreateSkill {
 }
 
 /// `GET …/skills` — the company's **effective** skill set, resolved by
-/// [`skill_effective::resolve`]: the global baseline, the company's on-disk
-/// bundles (`companies/<name>/skills/*/SKILL.md`), and the operator's
-/// [`SkillStateStore`] deltas, with the manifest's `[globals].disable` folded in
-/// as disabling deltas.
+/// [`resolve`](crate::company::skill_effective::resolve): the global baseline,
+/// the company's on-disk bundles (`companies/<name>/skills/*/SKILL.md`), and
+/// the operator's [`SkillStateStore`] deltas, with the manifest's
+/// `[globals].disable` folded in as disabling deltas.
 ///
 /// That is the same derivation the harness materializes for every agent, so the
 /// console reports the set the agents actually have — a disabled skill included,
@@ -260,18 +262,14 @@ async fn list_skills(
     State(state): State<AppState>,
     company: ScopedCompany,
 ) -> Result<Json<Vec<InstalledSkill>>, ApiError> {
-    let mut deltas = company.runtime.skills().list(company.id()).await?;
-    deltas.extend(skill_effective::globals_skill_disables(
-        &company.runtime.globals_disable().await?,
-    ));
-    let registry = state.shared_skill_registry()?;
-    let effective = skill_effective::resolve(company.runtime.source_dir(), &registry, &deltas)?;
+    let set =
+        skill_set::load_runtime_skill_set(&company.runtime, state.shared_skill_registry()?).await?;
     let roster = scope::roster_scopes(&company.runtime).await?;
     Ok(Json(
-        effective
+        set.effective
             .iter()
             .map(|skill| {
-                InstalledSkill::from_effective(skill, &registry).with_agents(agents_for_skill(
+                InstalledSkill::from_effective(skill, &set.library).with_agents(agents_for_skill(
                     &skill.slug,
                     skill.enabled,
                     &roster,
@@ -325,7 +323,7 @@ async fn install(
         Some(doc) => {
             let rendered = render_skill_md(doc);
             let pin = SkillInstall {
-                digest: skill_digest(&rendered),
+                digest: document_digest(&rendered),
                 version: doc.version.clone(),
                 installed_by: Some(company.actor()),
                 installed_at_millis: now_millis(),
@@ -521,22 +519,18 @@ async fn create_custom(
 /// body. Shared by custom-skill authoring and registry install (which passes
 /// the description as the body).
 ///
-/// The frontmatter parser is line-based (`key: value`), so each scalar is
-/// collapsed to a single line: newlines become spaces. That prevents a
-/// name/description from injecting extra frontmatter fields or emitting a bare
-/// `---` line that would close the block early. (Colons within a value are
-/// safe — the parser splits only on the first one.)
+/// Rendered by [`render_skill_md`], whose one-line collapse keeps a name or
+/// description from injecting frontmatter keys or closing the block early.
 fn skill_md(name: &str, description: &str, category: Option<&str>, content: &str) -> String {
-    let one_line = |s: &str| s.replace(['\n', '\r'], " ");
-    let mut frontmatter = format!(
-        "name: {}\ndescription: {}\n",
-        one_line(name).trim(),
-        one_line(description).trim()
-    );
-    if let Some(category) = category {
-        frontmatter.push_str(&format!("category: {}\n", one_line(category).trim()));
-    }
-    format!("---\n{frontmatter}---\n{content}\n")
+    render_skill_md(&SkillDoc {
+        slug: String::new(),
+        name: name.to_string(),
+        description: description.to_string(),
+        category: category.map(str::to_string),
+        version: None,
+        body: format!("{content}\n"),
+        extra_frontmatter: Vec::new(),
+    })
 }
 
 /// Every slug the company already resolves — bundled, registry-installed and
@@ -549,13 +543,10 @@ async fn taken_slugs(
     state: &AppState,
     runtime: &crate::company::runtime::CompanyRuntime,
 ) -> Result<std::collections::HashSet<String>, ApiError> {
-    let mut deltas = runtime.skills().list(runtime.id()).await?;
-    deltas.extend(skill_effective::globals_skill_disables(
-        &runtime.globals_disable().await?,
-    ));
-    let registry = state.shared_skill_registry()?;
     Ok(
-        skill_effective::resolve(runtime.source_dir(), &registry, &deltas)?
+        skill_set::load_runtime_skill_set(runtime, state.shared_skill_registry()?)
+            .await?
+            .effective
             .into_iter()
             .map(|skill| skill.slug)
             .collect(),

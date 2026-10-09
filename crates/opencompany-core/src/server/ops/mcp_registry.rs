@@ -11,7 +11,7 @@
 //! only ever contain what somebody already knew the address of, so the tab is
 //! empty until it is pasted into.
 //!
-//! **List B** is [`McpRuntime`](crate::harness::mcp::McpRuntime), a wrapper over
+//! **List B** is [`McpRuntime`](crate::mcp::runtime::McpRuntime), a wrapper over
 //! OpenHuman's own MCP registry: two upstream directories (Smithery.ai and
 //! `modelcontextprotocol/registry`), a SQLite store of installs, named
 //! write-only env credentials, and a boot-time connect + supervisor. It is
@@ -49,7 +49,7 @@ use axum::routing::{delete, get, post, put};
 use crate::AppState;
 use crate::company::McpServer;
 use crate::company::mcp::{McpHealth, McpSource};
-use crate::company::mcp_endpoint::normalize_endpoint;
+use crate::mcp::decl::endpoint::normalize_endpoint;
 use crate::server::ops::mcp::{McpServerDto, RosterAgentDto};
 use crate::server::ops::scoped;
 
@@ -230,8 +230,8 @@ pub(super) fn declaration_from_directory(
 /// the declared server exactly where it was.
 ///
 /// The deeper reason is that List A is what the *agents* actually reach.
-/// `registry_for_agent` builds each agent's MCP registry from the List A decls
-/// and scopes it by `mcp:<name>` grants; the row's `name`, `enabled`, tool lists
+/// `resolve_for_agent` attaches List A decls to each agent's spec, scoped by
+/// `mcp:<name>` grants; the row's `name`, `enabled`, tool lists
 /// and credential all govern that path. A row relabelled `registry` would stop
 /// offering the controls that decide what the company's agents can call.
 ///

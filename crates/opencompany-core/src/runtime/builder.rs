@@ -160,39 +160,6 @@ pub(crate) fn agent_effective_grants(
     dedup(grants)
 }
 
-/// One agent's effective skill scope: its own `skills` narrowed against the
-/// company's enabled set, or that whole set when the agent lists none.
-///
-/// The same three states [`agent_effective_grants`] resolves, over skill slugs:
-/// absent inherits every enabled skill, an explicit empty list is a deliberate
-/// no-skills scope, and a list narrows.
-///
-/// Compiled in **every** build for the reason [`agent_effective_grants`] gives:
-/// the harness materializes from this and the agent detail route reports from
-/// it, and two derivations would let the console advertise a skill the harness
-/// never writes.
-///
-/// Entries match **exactly**. A tool glob selects a namespace with real
-/// hierarchy; a slug is a flat identifier, so a prefix would silently reach a
-/// skill installed after the scope was written. Filtering the enabled set rather
-/// than the request is what makes this narrow-only: a slug the company has not
-/// enabled — or has disabled — cannot survive, however it was spelled.
-pub(crate) fn agent_effective_skills(
-    company_enabled: &[String],
-    agent_skills: Option<&[String]>,
-) -> Vec<String> {
-    let scoped: Vec<String> = match agent_skills {
-        None => company_enabled.to_vec(),
-        Some([]) => Vec::new(),
-        Some(slugs) => company_enabled
-            .iter()
-            .filter(|enabled| slugs.iter().any(|want| want == *enabled))
-            .cloned()
-            .collect(),
-    };
-    dedup(scoped)
-}
-
 /// One agent's effective grants under the **three-level** narrowing
 /// `[tools].allow ∩ desk.tools ∩ [[agent]].tools`.
 ///
@@ -636,10 +603,11 @@ pub struct RuntimeBuilder {
     /// would quietly turn those assertions into statements about the baseline.
     /// The product entry points turn it on; nothing else does.
     seed_tasks: bool,
-    /// The repo-level shared skill library, passed to the harness so a pre-fix
-    /// registry install (whose stored `SKILL.md` is a one-line stub) is healed
-    /// from the live library. Empty when no repo checkout backs the host.
-    skills_registry: Arc<[crate::company::SkillDoc]>,
+    /// The host's shared skill library, snapshotted into the harness so a
+    /// pre-fix registry install (whose stored `SKILL.md` is a one-line stub) is
+    /// healed from it. [`NoLibrary`](crate::company::skill_library::NoLibrary)
+    /// when the host serves none.
+    skills_registry: Arc<dyn crate::company::skill_library::SkillLibrary>,
     /// Issue #85: the source-template provenance to stamp on this company's
     /// record at *first* launch. Set by the launch path when the manifest was
     /// seeded from a template directory; left `None` for a raw-manifest
@@ -762,7 +730,7 @@ impl RuntimeBuilder {
             hive_store: None,
             seed_dir: None,
             seed_tasks: false,
-            skills_registry: Arc::from([]),
+            skills_registry: Arc::new(crate::company::skill_library::NoLibrary),
             template_provenance: None,
             skip_activation_gate: false,
             feedback: None,
@@ -1126,11 +1094,13 @@ impl RuntimeBuilder {
         self
     }
 
-    /// Sets the repo-level shared skill library (`skills/*/SKILL.md`), used by
-    /// the harness to heal pre-fix registry installs. Unset leaves it empty,
-    /// which simply skips healing.
-    pub fn with_skills_registry(mut self, registry: Arc<[crate::company::SkillDoc]>) -> Self {
-        self.skills_registry = registry;
+    /// Sets the host's shared skill library, used by the harness to heal
+    /// pre-fix registry installs. Unset serves none, which simply skips healing.
+    pub fn with_skills_registry(
+        mut self,
+        library: Arc<dyn crate::company::skill_library::SkillLibrary>,
+    ) -> Self {
+        self.skills_registry = library;
         self
     }
 
@@ -3164,7 +3134,7 @@ impl RuntimeBuilder {
                                 // supplies the committed bundles.
                                 skills: Some(ops.skills.clone()),
                                 skills_source_dir: self.seed_dir.clone(),
-                                skills_registry: self.skills_registry.clone(),
+                                skills_registry: self.skills_registry.snapshot()?,
                                 mcp_servers,
                                 // Orchestrator read surface + delegation queue
                                 // (#53): the company's facts + event log ground
@@ -3179,13 +3149,12 @@ impl RuntimeBuilder {
                                 // the runner without a construction cycle.
                                 workflow_runner:
                                     crate::harness::orchestrator::WorkflowRunnerHandle::default(),
-                                // Error-hardening cell: a fresh MCP-failure queue
-                                // the `OcMcpCallTool` decorator fills and the brain
-                                // drains; and a LIVE secret-store handle so
+                                // A fresh MCP-failure queue the brain drains; and a
+                                // LIVE secret-store handle so
                                 // `HarnessPool::ensure` can re-resolve the effective
                                 // MCP set each turn (MCP-freshness) rather than the
                                 // snapshot frozen here at boot.
-                                mcp_failures: crate::harness::mcp_probe::McpFailureQueue::default(),
+                                mcp_failures: crate::mcp::observe::McpCallObserver::default(),
                                 pending_publishes:
                                     crate::harness::publish::PendingPublishQueue::default(),
                                 // Issue #339: the workflow half of a card's
@@ -3812,7 +3781,7 @@ impl RuntimeBuilder {
             match handover.as_ref().and_then(|h| h.mcp.clone()) {
                 Some(mcp) => runtime.set_mcp(mcp),
                 None => {
-                    let mcp = Arc::new(crate::harness::mcp::McpRuntime::new(home.join("mcp")));
+                    let mcp = Arc::new(crate::mcp::runtime::McpRuntime::new(home.join("mcp")));
                     runtime.set_mcp(mcp.clone());
                     tokio::spawn(async move { mcp.boot().await });
                 }
@@ -4420,6 +4389,3 @@ mod tests_scoped_grants;
 #[cfg(test)]
 #[path = "builder_tests_seed_cards.rs"]
 mod tests_seed_cards;
-#[cfg(test)]
-#[path = "builder_tests_skill_scope.rs"]
-mod tests_skill_scope;

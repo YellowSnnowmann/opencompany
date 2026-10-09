@@ -185,8 +185,8 @@ struct CapabilityStatusDto {
     /// #567). Unlike media/composio/search this is **not** a grant question: the
     /// `/mcp/servers` management routes ship in every build, so an operator can
     /// add a server, store a token and watch it probe healthy on a build that
-    /// hands agents no MCP tool at all — `registry_for_agent` is pushed onto the
-    /// belt behind `#[cfg(feature = "mcp")]`. The most misleading case is a
+    /// hands agents no MCP tool at all — servers are attached to an agent's spec
+    /// only behind `#[cfg(feature = "mcp")]`. The most misleading case is a
     /// build with `openhuman` but without `mcp`: live tool discovery and health
     /// probes answer for real (they ride the harness feature), so every read in
     /// the console looks correct while no agent can call the server. `false`

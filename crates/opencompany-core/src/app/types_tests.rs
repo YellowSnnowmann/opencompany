@@ -196,58 +196,10 @@ fn spec_reports_setup_incomplete_for_an_empty_unstamped_host() {
 
 #[cfg(feature = "mcp")]
 #[test]
-fn parked_oauth_flow_is_single_use() {
-    use crate::company::mcp_oauth::PendingOAuth;
-    use crate::ports::types::CompanyId;
-
+fn the_console_oauth_flow_starts_with_nothing_parked() {
     let state = AppState::new(AppConfig::default());
-    let pending = PendingOAuth {
-        company_id: CompanyId::new("acme"),
-        server_name: "notion".into(),
-        code_verifier: "verifier".into(),
-        client_id: "cid".into(),
-        client_secret: Some("secret".into()),
-        token_endpoint: "https://as.example/token".into(),
-        redirect_uri: "https://acme.example/oauth/mcp/callback".into(),
-    };
-
-    state.park_oauth("state-1".into(), pending.clone());
-    // First take reclaims it; a replayed callback finds nothing (single-use).
-    assert!(state.take_oauth("state-1").is_some());
-    assert!(state.take_oauth("state-1").is_none());
-    // An unknown state is always None.
-    assert!(state.take_oauth("never-parked").is_none());
-}
-
-#[cfg(feature = "mcp")]
-#[test]
-fn parked_oauth_flow_expires_and_is_swept() {
-    use crate::company::mcp_oauth::PendingOAuth;
-    use crate::ports::types::CompanyId;
-    use std::time::{Duration, Instant};
-
-    let state = AppState::new(AppConfig::default());
-    let pending = |server: &str| PendingOAuth {
-        company_id: CompanyId::new("acme"),
-        server_name: server.into(),
-        code_verifier: "verifier".into(),
-        client_id: "cid".into(),
-        client_secret: Some("secret".into()),
-        token_endpoint: "https://as.example/token".into(),
-        redirect_uri: "https://acme.example/oauth/mcp/callback".into(),
-    };
-    let stale_at = Instant::now() - (AppState::OAUTH_PENDING_TTL + Duration::from_secs(1));
-
-    // Stale-on-read: an entry parked past its TTL is rejected (and removed).
-    state.park_oauth_at("expired".into(), pending("notion"), stale_at);
-    assert!(state.take_oauth("expired").is_none());
-
-    // Sweep-on-park: parking a fresh flow evicts any stale sibling first, so
-    // an abandoned flow's secrets can't outlive the TTL even if never taken.
-    state.park_oauth_at("stale".into(), pending("slack"), stale_at);
-    state.park_oauth("fresh".into(), pending("github"));
-    assert!(state.take_oauth("stale").is_none());
-    assert!(state.take_oauth("fresh").is_some());
+    assert_eq!(state.mcp_oauth().pending_count(), 0);
+    assert_eq!(state.mcp_oauth().pending_server("never-parked"), None);
 }
 
 #[test]
@@ -414,14 +366,14 @@ fn static_tier_still_answers_and_is_outranked_by_a_projected_file() {
 
 #[test]
 fn skill_registry_loads_the_shipped_bundles_and_caches() {
-    let state = AppState::new(AppConfig::default());
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../companies");
+    let state = AppState::new(AppConfig::default()).with_skill_library(Arc::new(
+        crate::company::skill_library::DirLibrary::explicit(dir),
+    ));
 
-    let first = state.skill_registry(&dir).expect("registry loads");
+    let first = state.shared_skill_registry().expect("registry loads");
     assert!(first.iter().any(|skill| skill.slug == "web-research"));
     assert!(first.iter().any(|skill| skill.slug == "weekly-report"));
-    // The post-call half of the meeting pair (#240): its body must carry the
-    // full contract, not just the frontmatter description.
     let debrief = first
         .iter()
         .find(|skill| skill.slug == "call-debrief")
@@ -431,27 +383,44 @@ fn skill_registry_loads_the_shipped_bundles_and_caches() {
     assert!(debrief.body.contains("## Steps"), "{}", debrief.body);
     assert!(debrief.body.contains("## Output"), "{}", debrief.body);
 
-    // A second call returns the same cached allocation, ignoring the path.
     let second = state
-        .skill_registry(std::path::Path::new("/nonexistent"))
+        .clone()
+        .shared_skill_registry()
         .expect("cached registry");
-    assert!(Arc::ptr_eq(&first, &second));
+    assert!(
+        Arc::ptr_eq(&first, &second),
+        "a clone of the state shares the cached load"
+    );
 }
 
 #[test]
 fn skill_registry_rejects_a_configured_but_missing_library() {
-    // A configured `skills_root` that does not exist is a host
-    // misconfiguration. `load_catalog_skills` returns `Ok(empty)` for a missing
-    // dir, so without the `is_dir` guard the registry would silently flatten
-    // to empty — downgrading a server-authoritative install to a
-    // client-authored one, the invariant `shared_skill_registry` forbids.
+    let state = AppState::new(AppConfig::default()).with_skill_library(Arc::new(
+        crate::company::skill_library::DirLibrary::explicit("/nonexistent"),
+    ));
+    for err in [
+        state
+            .shared_skill_registry()
+            .expect_err("a missing configured library must fail, not load empty"),
+        state
+            .checked_skill_library()
+            .expect_err("the boot-time check refuses it too"),
+    ] {
+        assert!(
+            matches!(err, crate::OpenCompanyError::Config(_)),
+            "expected a Config error for a missing library, got {err:?}"
+        );
+    }
+}
+
+#[test]
+fn a_state_with_no_library_serves_an_empty_registry() {
     let state = AppState::new(AppConfig::default());
-    let err = state
-        .skill_registry(std::path::Path::new("/nonexistent"))
-        .expect_err("a missing configured library must fail, not load empty");
-    assert!(
-        matches!(err, crate::OpenCompanyError::Config(_)),
-        "expected a Config error for a missing library, got {err:?}"
+    assert!(state.shared_skill_registry().unwrap().is_empty());
+    assert!(state.checked_skill_library().is_ok());
+    assert_eq!(
+        state.skill_library().origin(),
+        crate::company::skill_library::LibraryOrigin::None
     );
 }
 

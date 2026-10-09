@@ -31,11 +31,11 @@ use serde_json::{Value, json};
 
 use crate::company::CompanyManifest;
 use crate::company::credentials::Credential;
-use crate::harness::mcp_probe::McpFailureQueue;
 use crate::harness::orchestrator::{DelegationQueue, WorkflowRunnerHandle};
 use crate::harness::policy::ApprovalRequestQueue;
 use crate::harness::provider::{HostedProvider, HostedProviderConfig};
 use crate::harness::{HarnessDeps, HarnessPool};
+use crate::mcp::observe::McpCallObserver;
 use crate::ports::types::CompanyRecord;
 use crate::ports::workspace::{NodeKind, WorkspaceNode, WorkspaceOrigin, WorkspaceStore};
 use crate::store::{FsCompanyStore, FsOps};
@@ -307,7 +307,7 @@ pub(crate) async fn harness(
         events: None,
         delegations: DelegationQueue::default(),
         workflow_runner: WorkflowRunnerHandle::default(),
-        mcp_failures: McpFailureQueue::default(),
+        mcp_failures: McpCallObserver::default(),
         pending_publishes: crate::harness::publish::PendingPublishQueue::default(),
         workflow_refs: crate::harness::workflow_refs::WorkflowRefQueue::default(),
         run_outputs: crate::harness::orchestrator::RunOutputCache::default(),

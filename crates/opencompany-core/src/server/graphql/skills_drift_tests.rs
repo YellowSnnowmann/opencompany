@@ -10,10 +10,11 @@
 
 use std::sync::Arc;
 
-use crate::company::{parse_skill_md, skill_digest};
+use crate::company::parse_skill_md;
 use crate::ports::skills_state::{SkillInstall, SkillSource, SkillState};
 use crate::ports::types::CompanyId;
 use crate::server::router;
+use tinyskills::document_digest;
 
 use super::graphql_test_group_1::query;
 use super::graphql_test_support_1::*;
@@ -56,7 +57,7 @@ async fn seed(state: &crate::AppState, stored: &str, pinned: &str) {
                 custom_doc: Some(stored.to_string()),
                 updated_at_millis: Some(1_700_000_000_000),
                 install: Some(SkillInstall {
-                    digest: skill_digest(pinned),
+                    digest: document_digest(pinned),
                     version: parse_skill_md(SLUG, pinned).unwrap().version,
                     installed_by: None,
                     installed_at_millis: 1_700_000_000_000,
@@ -81,7 +82,9 @@ async fn row(
     }
     let state = state_with_company(home)
         .await
-        .with_skills_root(library_root.to_path_buf());
+        .with_skill_library(std::sync::Arc::new(
+            crate::company::skill_library::DirLibrary::explicit(library_root.to_path_buf()),
+        ));
     if let Some((stored, pinned)) = stored {
         seed(&state, stored, pinned).await;
     }
@@ -173,7 +176,9 @@ async fn rest_and_graphql_agree_about_one_install_standing() {
     .await;
     let state = state_with_company(home_dir.path())
         .await
-        .with_skills_root(library_dir.path().to_path_buf());
+        .with_skill_library(std::sync::Arc::new(
+            crate::company::skill_library::DirLibrary::explicit(library_dir.path().to_path_buf()),
+        ));
     seed(&state, &installed, &installed).await;
 
     let gql = query(router(state.clone()), SKILLS_QUERY).await;
@@ -190,7 +195,7 @@ async fn rest_and_graphql_agree_about_one_install_standing() {
         runtime.skills().list(runtime.id()).await.unwrap()
     };
     let registry = state.shared_skill_registry().unwrap();
-    let effective = crate::company::skill_effective::resolve(None, &registry, &deltas).unwrap();
+    let effective = crate::company::skill_set::resolve_company(None, &registry, &deltas).unwrap();
     let entry = effective.iter().find(|e| e.slug == SLUG).unwrap();
     let drifted = crate::company::effective_drift(entry, &registry).expect("a pinned install");
 

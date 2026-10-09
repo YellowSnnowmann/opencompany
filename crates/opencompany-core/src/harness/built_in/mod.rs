@@ -122,8 +122,6 @@ pub mod hosting;
 mod iteration_cap_turn_tests;
 pub mod ledger_tools;
 pub mod lifecycle;
-pub mod mcp;
-pub mod mcp_probe;
 /// Recovering a tool call that a model on the **native** transport wrote into
 /// its message body as prose instead of emitting it through the structured
 /// channel. Validated against the tools the turn itself offered — the marker a
@@ -264,10 +262,10 @@ use crate::company::mcp::McpServerDecl;
 use crate::company::steer::SteerControl;
 use crate::error::OpenCompanyError;
 use crate::harness::cost::{TurnUsage, record_turn_cost};
-use crate::harness::mcp_probe::McpFailureQueue;
 use crate::harness::orchestrator::DelegationQueue;
 use crate::harness::policy::{ApprovalPolicy, ApprovalRequestQueue};
 use crate::hive::mcp_server::McpHost;
+use crate::mcp::observe::{AgentMcpObserver, McpCallObserver};
 use crate::ports::skills_state::{SkillState, SkillStateStore};
 use crate::ports::types::{
     Actor, ActorKind, AgentOverride, BudgetOverride, CompanyId, CompanyRecord, EventSeq,
@@ -315,7 +313,7 @@ pub struct HarnessDeps {
     /// (`{root}/{company}/{agent}/workspace`).
     pub workspace_root: PathBuf,
     /// The company home's MCP store directory — `<home>/mcp`, the same one
-    /// [`McpRuntime`](crate::harness::mcp::McpRuntime) is built over.
+    /// [`McpRuntime`](crate::mcp::runtime::McpRuntime) is built over.
     ///
     /// Carried because OpenHuman's `mcp_registry_*` tools take a config now
     /// instead of reading a process global, and the toolbelt has to hand them
@@ -434,11 +432,12 @@ pub struct HarnessDeps {
     /// Default (and any build with no runner) leaves it empty and the tool
     /// reports workflow execution is not wired.
     pub workflow_runner: crate::harness::orchestrator::WorkflowRunnerHandle,
-    /// The shared MCP failure queue the `OcMcpCallTool` decorator pushes onto and
-    /// the [`HarnessBrain`] drains after a turn (the error-hardening cell). Same
-    /// cheap-shared-handle pattern as [`Self::delegations`]; every string it
-    /// carries is scrubbed at the source. Default is an empty queue.
-    pub mcp_failures: McpFailureQueue,
+    /// The company's MCP call observer: every agent built from these deps
+    /// records the MCP calls that failed in its turns here, and the
+    /// [`HarnessBrain`] drains them after a turn. Same cheap-shared-handle
+    /// pattern as [`Self::delegations`]; every string it carries is scrubbed
+    /// at the source. Default is an empty observer.
+    pub mcp_failures: McpCallObserver,
     /// The shared publish queue the `publish_artifact` tool stages onto and the
     /// [`HarnessBrain`] drains at the end of a dispatch (issue #244). Same
     /// cheap-shared-handle pattern as [`Self::mcp_failures`], and for the same
@@ -762,6 +761,9 @@ pub struct CompanyAgent {
     /// telemetry cells. Held here so `meter_turn_costs` reads the SAME
     /// instance the turn ran through.
     chat_model: Arc<dyn HarnessModel>,
+    /// Reads this agent's completed MCP calls after each turn: meters the
+    /// answered ones and records the failed ones on the company's observer.
+    mcp_observer: AgentMcpObserver,
 }
 
 impl std::fmt::Debug for CompanyAgent {
@@ -1377,6 +1379,7 @@ impl CompanyAgent {
         let build::AgentBlueprint {
             workspace,
             chat_model,
+            mcp_observer,
             ..
         } = blueprint;
         // No `.tools(..)`: the belt is the agent's own now. The entry keeps
@@ -1410,6 +1413,7 @@ impl CompanyAgent {
             mcp,
             workspace,
             chat_model,
+            mcp_observer,
         })
     }
 
@@ -1602,18 +1606,18 @@ impl CompanyAgent {
             turn.send()
         };
         let slot_budget = |summary: String| {
-            let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
+            let redacted = crate::redact::redact(&summary, &[]);
             if let Ok(mut slot) = budget_pause_summary.lock() {
                 *slot = Some(redacted.clone());
             }
-            crate::harness::mcp_probe::scrub(&redacted, &[])
+            crate::redact::scrub(&redacted, &[])
         };
         let slot_ceiling = |summary: String, elapsed: Duration| {
-            let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
+            let redacted = crate::redact::redact(&summary, &[]);
             if let Ok(mut slot) = ceiling_pause.lock() {
                 *slot = Some((redacted.clone(), elapsed));
             }
-            crate::harness::mcp_probe::scrub(&redacted, &[])
+            crate::redact::scrub(&redacted, &[])
         };
         let turn_body = async {
             let mut usages: Vec<TurnUsage> = Vec::new();
@@ -1632,7 +1636,7 @@ impl CompanyAgent {
                 }
                 AttemptOutcome::Empty => {
                     if steer.map(|c| c.requested()).unwrap_or(false) || envelope.spend_halted() {
-                        Ok(crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[]))
+                        Ok(crate::redact::scrub(GRACEFUL_EMPTY_REPLY, &[]))
                     } else {
                         let retry_started = std::time::Instant::now();
                         let second = send(pump.sender()).await.map(|outcome| outcome.reply);
@@ -1641,7 +1645,7 @@ impl CompanyAgent {
                         match self.classify_turn(self.unmask(second), second_elapsed) {
                             AttemptOutcome::Reply(reply) => Ok(reply),
                             AttemptOutcome::Empty => {
-                                Ok(crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[]))
+                                Ok(crate::redact::scrub(GRACEFUL_EMPTY_REPLY, &[]))
                             }
                             AttemptOutcome::BudgetPaused { summary } => Ok(slot_budget(summary)),
                             // A ceiling can fire on the retry too: this arm
@@ -1661,6 +1665,7 @@ impl CompanyAgent {
             envelope.run(surface, None, Box::pin(turn_body)).await;
 
         let events = pump.finish().await;
+        self.mcp_observer.observe(&events).await;
         turn_envelope::price_usages(&self.agent_id, &mut usages, &events);
         let findings = turn_envelope::turn_findings(
             &self.agent_id,
@@ -2934,20 +2939,14 @@ impl HarnessPool {
         // surfaces until a restart (the regression). `build_roster`/`build_agent`
         // stay synchronous and fold these deltas into each agent's effective
         // skill set; the same Vec is reused for the rebuild below (no re-fetch).
-        let mut skill_deltas = match &deps.skills {
-            Some(store) => store.list(&company.id).await?,
-            None => Vec::new(),
-        };
-        // `[globals].disable = ["skill:…"]` reaches the effective set as a
-        // synthesized disabling delta rather than a second opt-out mechanism
-        // inside `EffectiveSkills`: the manifest and the console are then saying
-        // the same thing in the same vocabulary, and a disable always beats an
-        // enable there, so the company's own declaration wins over a console
-        // re-enable of a skill it opted out of.
-        skill_deltas.extend(crate::company::skill_effective::globals_skill_disables(
+        let skill_deltas = crate::company::skill_set::load_skill_deltas(
+            deps.skills.as_deref(),
+            crate::company::skill_set::SkillOwner {
+                company: &company.id,
+            },
             &company.manifest.globals.disable,
-        ));
-        let skill_deltas = skill_deltas;
+        )
+        .await?;
         let skill_fp = skill_delta_fingerprint(&skill_deltas);
 
         // Resolve the routed workspace documents (context routing) before the
@@ -4811,7 +4810,7 @@ impl HarnessPool {
 ///
 /// The per-tool policy and the discovered inventory are terms too: the attached
 /// server's deny list is resolved from them, so a tool set to
-/// [`Blocked`](crate::company::mcp_policy::ApprovalMode::Blocked) would
+/// [`Blocked`](crate::mcp::policy::ApprovalMode::Blocked) would
 /// otherwise stay callable for as long as the cached roster stands.
 fn mcp_fingerprint(decls: &[McpServerDecl]) -> u64 {
     use std::collections::hash_map::DefaultHasher;
@@ -4839,17 +4838,17 @@ fn mcp_fingerprint(decls: &[McpServerDecl]) -> u64 {
 
 /// Folds one server's stored tool policy into the fingerprint, canonically.
 ///
-/// The company halves of [`McpToolPolicies`](crate::company::mcp_policy::McpToolPolicies)
+/// The company halves of [`McpToolPolicies`](crate::mcp::policy::McpToolPolicies)
 /// are `HashMap`-backed and iterate in an order that varies per map instance, so
 /// the tiers are read totally, in
-/// [`ToolTier::ALL`](crate::company::mcp_policy::ToolTier::ALL) order, and the
+/// [`ToolTier::ALL`](crate::mcp::policy::ToolTier::ALL) order, and the
 /// overrides through a [`BTreeMap`](std::collections::BTreeMap). The per-agent
 /// map is already a `BTreeMap` of `BTreeMap`s.
 fn hash_tool_policies<H: std::hash::Hasher>(
-    policies: &crate::company::mcp_policy::McpToolPolicies,
+    policies: &crate::mcp::policy::McpToolPolicies,
     hasher: &mut H,
 ) {
-    use crate::company::mcp_policy::{ApprovalMode, ToolTier};
+    use crate::mcp::policy::{ApprovalMode, ToolTier};
     use std::collections::BTreeMap;
     use std::hash::Hash;
 
@@ -4872,7 +4871,7 @@ fn hash_tool_policies<H: std::hash::Hasher>(
 /// `discovered_at_millis` is left out: every successful probe rewrites it, and a
 /// re-probe that learned nothing must not rebuild the roster.
 fn hash_tool_inventory<H: std::hash::Hasher>(
-    inventory: &crate::company::mcp_policy::McpToolInventory,
+    inventory: &crate::mcp::policy::McpToolInventory,
     hasher: &mut H,
 ) {
     use std::hash::Hash;
@@ -4894,8 +4893,8 @@ fn auth_kind(material: &crate::company::mcp::AuthMaterial) -> u8 {
 
 /// Refreshes any near-expiry console-OAuth credential in `decls` before the
 /// registry is built, re-persisting the rotated token **write-only** so agents
-/// never send an expired bearer. Per-tenant analogue of OpenHuman's
-/// `mcp_registry::oauth::refresh_if_expired`. A refresh failure is non-fatal —
+/// never send an expired bearer, through tinymcp's guarded
+/// `OAuthFlow::refresh`. A refresh failure is non-fatal —
 /// the old token is kept and the next `401` re-prompts sign-in.
 #[cfg(feature = "mcp")]
 async fn refresh_oauth_decls(
@@ -4906,9 +4905,6 @@ async fn refresh_oauth_decls(
     use crate::company::mcp_oauth;
 
     for decl in decls.iter_mut() {
-        if !mcp_oauth::needs_refresh(&decl.auth, 60) {
-            continue;
-        }
         let Some(new_material) = mcp_oauth::refresh(&decl.auth).await else {
             continue;
         };
@@ -5561,7 +5557,7 @@ pub(crate) fn agent_mcp_reads(
     agent: &str,
     grants: &[String],
 ) -> crate::policy::McpReadSet {
-    crate::company::mcp_policy::mcp_allow_set_for_agent(&deps.mcp_servers, agent, grants)
+    crate::mcp::policy::mcp_allow_set_for_agent(&deps.mcp_servers, agent, grants)
 }
 
 /// The approval policy every roster teammate starts from, before the per-agent
@@ -5987,7 +5983,7 @@ pub(crate) fn workflow_wiring_deps(
         events: None,
         delegations: orchestrator::DelegationQueue::default(),
         workflow_runner: orchestrator::WorkflowRunnerHandle::default(),
-        mcp_failures: mcp_probe::McpFailureQueue::default(),
+        mcp_failures: crate::mcp::observe::McpCallObserver::default(),
         pending_publishes: publish::PendingPublishQueue::default(),
         workflow_refs: workflow_refs::WorkflowRefQueue::default(),
         run_outputs: orchestrator::RunOutputCache::default(),

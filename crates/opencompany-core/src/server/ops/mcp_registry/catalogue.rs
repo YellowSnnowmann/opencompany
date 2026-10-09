@@ -29,7 +29,7 @@ use crate::company::mcp::{McpHealth, McpStatus, stdio_install_refusal};
 /// # Why `last_error` is dropped, not scrubbed
 ///
 /// Upstream's `ConnStatus` carries a raw `last_error` from the transport. List A
-/// runs its equivalent through [`scrub`](crate::harness::mcp_probe::scrub),
+/// runs its equivalent through [`scrub`](crate::redact::scrub),
 /// whose redaction pass needs **the credential values** to replace them with
 /// `•••`. A registry install's credentials are its env values, which this
 /// surface deliberately never loads — so there is no known-secret set to scrub

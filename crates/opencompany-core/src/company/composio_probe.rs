@@ -12,7 +12,7 @@
 //! decision is one function, the operator-facing sentence is another, and
 //! neither touches the network or a store. That split is what makes every
 //! branch below testable without standing up a Composio backend, which is the
-//! same arrangement `harness::built_in::mcp_probe::classify_mcp_error` already
+//! same arrangement `mcp::probe::classify_mcp_error` already
 //! uses for MCP transport errors.
 //!
 //! ## Branch order is load-bearing

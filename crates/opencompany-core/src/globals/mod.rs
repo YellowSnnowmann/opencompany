@@ -8,10 +8,9 @@
 //! contract is `docs/spec/runtime/globals.md`.
 //!
 //! Everything here is **embedded at build time**, not read from disk. A
-//! platform-provisioned tenant container carries no repository checkout — the
-//! same reason `skills_root()` is `None` there and the shared skill registry is
-//! empty — so a baseline resolved from the filesystem would be a baseline every
-//! hosted company silently lacked. `build.rs` generates the tables; this module
+//! platform-provisioned tenant container carries no repository checkout, so a
+//! baseline resolved from the filesystem would be a baseline every hosted
+//! company silently lacked. `build.rs` generates the tables; this module
 //! parses them once and caches the result.
 //!
 //! Malformed input is a fault, never a panic and never an abort: a company must

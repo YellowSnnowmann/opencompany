@@ -3,7 +3,8 @@
 //! What a company's effective skills *are* lives in
 //! [`crate::company::skill_effective`], which the console's read paths share.
 //! [`EffectiveSkills::materialize`] takes that set and writes its enabled
-//! entries into a scratch `skills/<slug>/` tree under a per-agent directory.
+//! entries into a scratch `skills/<slug>/` tree under a per-agent directory
+//! with [`tinyskills::materialize_tree`].
 //! OpenHuman's three skill read tools then scan that tree (its `skills/` root is
 //! the legacy skill root, scanned without a trust marker) so an agent can **see
 //! and read** its skills.
@@ -33,11 +34,12 @@ use openhuman_core as oh;
 
 use oh::config::Config;
 use oh::skills::tools::{WorkflowDescribeTool, WorkflowListTool, WorkflowReadResourceTool};
+use tinyskills::cap_std::{ambient_authority, fs::Dir};
+use tinyskills::{MaterializeEntry, MaterializeSource, materialize_tree, sanitize_catalogue_text};
 use tinytools::Tool;
 
 use crate::company::SkillDoc;
-use crate::company::skill_effective::{self, SkillBody};
-use crate::company::skill_scan::sanitize_catalogue_text;
+use crate::company::skill_effective::SkillBody;
 use crate::error::OpenCompanyError;
 use crate::ports::skills_state::SkillState;
 
@@ -67,6 +69,12 @@ pub struct EffectiveSkills {
     docs: Vec<SkillDoc>,
 }
 
+fn open_dir(path: &Path) -> crate::Result<Dir> {
+    Dir::open_ambient_dir(path, ambient_authority()).map_err(|e| {
+        OpenCompanyError::Harness(format!("opening skill directory {}: {e}", path.display()))
+    })
+}
+
 impl EffectiveSkills {
     /// Materializes the effective skill set for one agent under `workspace_dir`.
     ///
@@ -89,8 +97,11 @@ impl EffectiveSkills {
     /// would leave `read_skill_resource` able to open a skill the agent does not
     /// have.
     ///
-    /// The `workspace_dir/skills/` tree is rebuilt from scratch on every call so
-    /// a rebuild reflects the current deltas (removed skills disappear).
+    /// The `workspace_dir/skills/` tree is rebuilt from scratch on every call by
+    /// [`materialize_tree`], so a rebuild reflects the current deltas (removed
+    /// skills disappear). A bundle is copied without its symlinks; a skill
+    /// whose slug is not a safe directory name is left out of the tree and the
+    /// catalogue alike.
     pub fn materialize(
         workspace_dir: PathBuf,
         source_dir: Option<&Path>,
@@ -99,26 +110,16 @@ impl EffectiveSkills {
         agent: &str,
         agent_skills: Option<&[String]>,
     ) -> crate::Result<Self> {
-        let effective =
-            skill_effective::resolve_for_agent(source_dir, registry, deltas, agent, agent_skills)?;
-
-        let skills_out = workspace_dir.join("skills");
-        if skills_out.exists() {
-            std::fs::remove_dir_all(&skills_out).map_err(|e| {
-                OpenCompanyError::Harness(format!(
-                    "clearing skill scratch {}: {e}",
-                    skills_out.display()
-                ))
-            })?;
-        }
-        std::fs::create_dir_all(&skills_out).map_err(|e| {
-            OpenCompanyError::Harness(format!(
-                "creating skill scratch {}: {e}",
-                skills_out.display()
-            ))
-        })?;
+        let effective = crate::company::skill_set::resolve_company_for_agent(
+            source_dir,
+            registry,
+            deltas,
+            agent,
+            agent_skills,
+        )?;
 
         let mut docs = Vec::new();
+        let mut entries = Vec::new();
         for skill in effective {
             if !skill.enabled {
                 continue;
@@ -126,26 +127,45 @@ impl EffectiveSkills {
             let Some(content) = skill.content else {
                 continue;
             };
-            let dest = skills_out.join(&skill.slug);
-            match &content.body {
-                SkillBody::Bundle(src) => copy_dir_recursive(src, &dest)?,
-                SkillBody::Inline(body) => {
-                    std::fs::create_dir_all(&dest).map_err(|e| {
-                        OpenCompanyError::Harness(format!(
-                            "creating skill dir {}: {e}",
-                            dest.display()
-                        ))
-                    })?;
-                    std::fs::write(dest.join("SKILL.md"), body).map_err(|e| {
-                        OpenCompanyError::Harness(format!(
-                            "writing SKILL.md for '{}': {e}",
-                            skill.slug
-                        ))
-                    })?;
-                }
+            if !tinyskills::is_safe_segment(&skill.slug) {
+                tracing::warn!(
+                    "[skills] not materializing a skill whose slug is not a safe directory name: {:?}",
+                    skill.slug
+                );
+                continue;
             }
+            let source = match content.body {
+                SkillBody::Bundle(src) => MaterializeSource::Dir(Arc::new(open_dir(&src)?)),
+                SkillBody::Inline(body) => MaterializeSource::Document(body),
+            };
+            entries.push(MaterializeEntry {
+                dir_name: skill.slug,
+                source,
+            });
             docs.push(content.doc);
         }
+
+        let skills_out = workspace_dir.join("skills");
+        std::fs::create_dir_all(&workspace_dir).map_err(|e| {
+            OpenCompanyError::Harness(format!(
+                "creating skill workspace {}: {e}",
+                workspace_dir.display()
+            ))
+        })?;
+        let parent = open_dir(&workspace_dir)?;
+        let report = materialize_tree(&parent, "skills", &entries).map_err(|e| {
+            OpenCompanyError::Harness(format!(
+                "materializing skill tree {}: {e}",
+                skills_out.display()
+            ))
+        })?;
+        tracing::debug!(
+            "[skills] materialized {} skills ({} files, {} symlinks skipped) under {}",
+            report.dirs.len(),
+            report.files,
+            report.skipped_symlinks,
+            skills_out.display()
+        );
 
         Ok(Self {
             workspace_dir,
@@ -237,47 +257,19 @@ impl EffectiveSkills {
     }
 }
 
-/// Recursively copies a skill bundle directory (SKILL.md plus any bundled
-/// resource files) into `dest`. Regular files and directories only — symlinks
-/// are skipped so a bundle can't smuggle out-of-tree content into the scratch.
-fn copy_dir_recursive(src: &Path, dest: &Path) -> crate::Result<()> {
-    std::fs::create_dir_all(dest)
-        .map_err(|e| OpenCompanyError::Harness(format!("creating {}: {e}", dest.display())))?;
-    let entries = std::fs::read_dir(src)
-        .map_err(|e| OpenCompanyError::Harness(format!("reading {}: {e}", src.display())))?;
-    for entry in entries {
-        let entry = entry
-            .map_err(|e| OpenCompanyError::Harness(format!("reading {}: {e}", src.display())))?;
-        let file_type = entry.file_type().map_err(|e| {
-            OpenCompanyError::Harness(format!("stat {}: {e}", entry.path().display()))
-        })?;
-        if file_type.is_symlink() {
-            continue;
-        }
-        let from = entry.path();
-        let to = dest.join(entry.file_name());
-        if file_type.is_dir() {
-            copy_dir_recursive(&from, &to)?;
-        } else if file_type.is_file() {
-            std::fs::copy(&from, &to).map_err(|e| {
-                OpenCompanyError::Harness(format!(
-                    "copying {} -> {}: {e}",
-                    from.display(),
-                    to.display()
-                ))
-            })?;
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 #[path = "skills_catalogue_tests.rs"]
 mod catalogue_tests;
 
 #[cfg(test)]
+#[path = "skills_materialize_tests.rs"]
+mod materialize_tests;
+#[cfg(test)]
 #[path = "skills_scope_tests.rs"]
 mod scope_tests;
+#[cfg(test)]
+#[path = "skills_stale_read_tests.rs"]
+mod stale_read_tests;
 #[cfg(test)]
 #[path = "skills_tests.rs"]
 mod tests;

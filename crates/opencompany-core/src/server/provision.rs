@@ -396,8 +396,8 @@ async fn provision(
     // that cannot load is a server error rather than a silent empty registry —
     // provisioning a runtime that cannot heal its registry installs would hide
     // the misconfiguration until an agent came up skill-less.
-    let skills_registry = match state.shared_skill_registry() {
-        Ok(registry) => registry,
+    let skills_registry = match state.checked_skill_library() {
+        Ok(library) => library,
         Err(err) => return ApiError(err).into_response(),
     };
 

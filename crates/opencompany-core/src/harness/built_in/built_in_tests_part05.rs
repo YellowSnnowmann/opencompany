@@ -70,7 +70,7 @@ async fn a_metering_failure_does_not_swallow_a_stale_marker_retirement() {
         events: None,
         delegations: DelegationQueue::default(),
         workflow_runner: crate::harness::orchestrator::WorkflowRunnerHandle::default(),
-        mcp_failures: McpFailureQueue::default(),
+        mcp_failures: McpCallObserver::default(),
         pending_publishes: crate::harness::publish::PendingPublishQueue::default(),
         workflow_refs: crate::harness::workflow_refs::WorkflowRefQueue::default(),
         run_outputs: crate::harness::orchestrator::RunOutputCache::default(),
@@ -158,7 +158,7 @@ async fn a_metering_failure_does_not_swallow_a_stale_marker_retirement() {
 /// `summary`.
 ///
 /// Before this fix, only the copy returned as the turn's authored REPLY
-/// was scrubbed (`Ok(mcp_probe::scrub(&summary, &[]))`); the copy stored
+/// was scrubbed (`Ok(redact::scrub(&summary, &[]))`); the copy stored
 /// into the `budget_pause_summary` mutex slot — which becomes
 /// `TurnOutcome::budget_paused.summary`, and from there the durable
 /// `BudgetPauseMarker.summary` AND the chat notice text
@@ -213,7 +213,7 @@ async fn a_budget_pause_summary_is_scrubbed_before_it_is_persisted_anywhere() {
         events: None,
         delegations: DelegationQueue::default(),
         workflow_runner: crate::harness::orchestrator::WorkflowRunnerHandle::default(),
-        mcp_failures: McpFailureQueue::default(),
+        mcp_failures: McpCallObserver::default(),
         pending_publishes: crate::harness::publish::PendingPublishQueue::default(),
         workflow_refs: crate::harness::workflow_refs::WorkflowRefQueue::default(),
         run_outputs: crate::harness::orchestrator::RunOutputCache::default(),
@@ -348,7 +348,7 @@ async fn a_successful_turn_retires_a_stale_reissue_marker_for_the_same_agent() {
         events: None,
         delegations: DelegationQueue::default(),
         workflow_runner: crate::harness::orchestrator::WorkflowRunnerHandle::default(),
-        mcp_failures: McpFailureQueue::default(),
+        mcp_failures: McpCallObserver::default(),
         pending_publishes: crate::harness::publish::PendingPublishQueue::default(),
         workflow_refs: crate::harness::workflow_refs::WorkflowRefQueue::default(),
         run_outputs: crate::harness::orchestrator::RunOutputCache::default(),
@@ -490,7 +490,7 @@ async fn an_unrelated_success_does_not_retire_a_different_requests_marker() {
         events: None,
         delegations: DelegationQueue::default(),
         workflow_runner: crate::harness::orchestrator::WorkflowRunnerHandle::default(),
-        mcp_failures: McpFailureQueue::default(),
+        mcp_failures: McpCallObserver::default(),
         pending_publishes: crate::harness::publish::PendingPublishQueue::default(),
         workflow_refs: crate::harness::workflow_refs::WorkflowRefQueue::default(),
         run_outputs: crate::harness::orchestrator::RunOutputCache::default(),
@@ -607,7 +607,7 @@ async fn identical_text_in_a_different_thread_does_not_retire_the_original_marke
         events: None,
         delegations: DelegationQueue::default(),
         workflow_runner: crate::harness::orchestrator::WorkflowRunnerHandle::default(),
-        mcp_failures: McpFailureQueue::default(),
+        mcp_failures: McpCallObserver::default(),
         pending_publishes: crate::harness::publish::PendingPublishQueue::default(),
         workflow_refs: crate::harness::workflow_refs::WorkflowRefQueue::default(),
         run_outputs: crate::harness::orchestrator::RunOutputCache::default(),

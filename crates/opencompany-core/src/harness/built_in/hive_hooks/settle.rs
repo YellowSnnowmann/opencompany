@@ -289,6 +289,7 @@ impl SettleTurn<'_> {
             Some(pump) => pump.finish().await,
             None => Vec::new(),
         };
+        agent.mcp_observer.observe(&events).await;
         let mut usages = vec![agent.tapped_usage()];
         price_usages(&manifest, &mut usages, &events);
         if let Err(error) = super::super::meter_turn_costs(
@@ -318,21 +319,18 @@ impl SettleTurn<'_> {
             let reply = std::mem::take(&mut outcome.reply);
             outcome.reply = match agent.classify_turn(agent.unmask(Ok(reply)), elapsed) {
                 AttemptOutcome::Reply(reply) => reply,
-                AttemptOutcome::Empty => {
-                    crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[])
-                }
+                AttemptOutcome::Empty => crate::redact::scrub(GRACEFUL_EMPTY_REPLY, &[]),
                 AttemptOutcome::BudgetPaused { summary } => {
-                    budget_summary = Some(crate::harness::mcp_probe::redact(&summary, &[]));
+                    budget_summary = Some(crate::redact::redact(&summary, &[]));
                     BUDGET_PAUSED_PLACEHOLDER_REPLY.to_string()
                 }
                 AttemptOutcome::CeilingPaused { summary, elapsed } => {
-                    ceiling = Some((crate::harness::mcp_probe::redact(&summary, &[]), elapsed));
+                    ceiling = Some((crate::redact::redact(&summary, &[]), elapsed));
                     CEILING_PAUSED_PLACEHOLDER_REPLY.to_string()
                 }
-                AttemptOutcome::Hard(error) => crate::harness::mcp_probe::scrub(
-                    &format!("I could not finish this: {error}"),
-                    &[],
-                ),
+                AttemptOutcome::Hard(error) => {
+                    crate::redact::scrub(&format!("I could not finish this: {error}"), &[])
+                }
             };
             outcome
         });
@@ -541,10 +539,10 @@ impl SettleTurn<'_> {
         (result, disposition)
     }
 
-    /// Drains the MCP failure queue onto the turn's step timeline as error
-    /// steps, and journals each as a scrubbed `McpCallFailed`. The queue is
-    /// shared, so a failure another turn raised in the same window may land
-    /// here; it is attributed to a turn either way rather than lost.
+    /// Drains the company's MCP call failures onto the turn's step timeline as
+    /// error steps, and journals each as a scrubbed `McpCallFailed`. The
+    /// observer is shared, so a failure another turn raised in the same window
+    /// may land here; it is attributed to a turn either way rather than lost.
     async fn surface_mcp_failures(&self, steps: &mut Vec<TurnStep>) {
         for failure in self.seat.deps.mcp_failures.drain() {
             steps.push(TurnStep {
